@@ -22,7 +22,7 @@ enum {
 };
 
 // fields of identifier
-enum {Token, Hash, Name, Type, Class, Value, BType, BClass, BValue, IdSize};
+enum {Token, Hash, Name, Type, Class, Value, Size, BType, BClass, BValue, BSize, IdSize};
 
 
 // types of variable/function
@@ -311,7 +311,6 @@ void match(int tk) {
     }
 }
 
-
 void expression(int level) {
     // expressions have various format.
     // but majorly can be divided into two parts: unit and operator
@@ -330,6 +329,8 @@ void expression(int level) {
     int *id;
     int tmp;
     int *addr;
+	id = 0;
+
     {
         if (!token) {
             printf("%d: unexpected token EOF of expression\n", line);
@@ -359,6 +360,7 @@ void expression(int level) {
 
             // append the end of string character '\0', all the data are default
             // to 0, so just move data one position forward.
+			// align to 4 byte
             data = (char *)(((int)data + sizeof(int)) & (-sizeof(int)));
             expr_type = PTR;
         }
@@ -833,26 +835,31 @@ void expression(int level) {
                 match(token);
             }
             else if (token == Brak) {
+				if (id != 0 && id[Size] > 1) {
+					--text; // delete last LC/LI
+					tmp = tmp + PTR;
+				}
+
                 // array access var[xx]
                 match(Brak);
                 *++text = PUSH;
                 expression(Assign);
                 match(']');
-
-                if (tmp > PTR) {
-                    // pointer, `not char *`
-                    *++text = PUSH;
-                    *++text = IMM;
-                    *++text = sizeof(int);
-                    *++text = MUL;
-                }
-                else if (tmp < PTR) {
-                    printf("%d: pointer type expected\n", line);
-                    exit(-1);
-                }
-                expr_type = tmp - PTR;
-                *++text = ADD;
-                *++text = (expr_type == CHAR) ? LC : LI;
+					
+				if (tmp > PTR) {
+					// pointer, `not char *`
+					*++text = PUSH;
+					*++text = IMM;
+					*++text = sizeof(int);
+					*++text = MUL;
+				}
+				else if (tmp < PTR) {
+					printf("%d: pointer or array type expected\n", line);
+					exit(-1);
+				}
+				expr_type = tmp - PTR;
+				*++text = ADD;
+				*++text = (expr_type == CHAR) ? LC : LI;
             }
             else {
                 printf("%d: compiler error, token = %d\n", line, token);
@@ -991,6 +998,7 @@ void enum_declaration() {
         current_id[Class] = Num;
         current_id[Type] = INT;
         current_id[Value] = i++;
+		current_id[Size] = 1;
 
         if (token == ',') {
             next();
@@ -1082,6 +1090,25 @@ void function_body() {
             current_id[BClass] = current_id[Class]; current_id[Class]  = Loc;
             current_id[BType]  = current_id[Type];  current_id[Type]   = type;
             current_id[BValue] = current_id[Value]; current_id[Value]  = ++pos_local;   // index of current parameter
+			current_id[BSize] = current_id[Size]; current_id[Size] = 1;
+
+			if (token == Brak) {
+				// array declaration
+				match(Brak);
+				if (token == Num && token_val > 1) {
+					current_id[Size] = token_val;
+
+					// allocate memory & align to 4 byte
+					pos_local = pos_local - 1 + ((type == CHAR ? sizeof(char) : sizeof(int)) * (token_val) + sizeof(int) - sizeof(char)) / 4;
+					current_id[Value] = pos_local;
+				}
+				else {
+					printf("%d: bad array declaration\n", line);
+					exit(-1);
+				}
+				match(Num);
+				match(']');
+			}
 
             if (token == ',') {
                 match(',');
@@ -1121,6 +1148,7 @@ void function_declaration() {
             current_id[Class] = current_id[BClass];
             current_id[Type]  = current_id[BType];
             current_id[Value] = current_id[BValue];
+			current_id[Size] = current_id[BSize];
         }
         current_id = current_id + IdSize;
     }
@@ -1128,10 +1156,7 @@ void function_declaration() {
 
 void global_declaration() {
     // int [*]id [; | (...) {...}]
-
-
     int type; // tmp, actual type for variable
-    int i; // tmp
 
     basetype = INT;
 
@@ -1187,11 +1212,33 @@ void global_declaration() {
         if (token == '(') {
             current_id[Class] = Fun;
             current_id[Value] = (int)(text + 1); // the memory address of function
+			current_id[Size] = 0;
             function_declaration();
-        } else {
+        } 
+		else if (token == Brak) {
+			// array declaration
+			match(Brak);
+			if (token == Num && token_val >	1) {
+				current_id[Class] = Glo; // global variable
+				current_id[Value] = (int)data; // assign memory address
+				current_id[Size] = token_val;
+				
+				// allocate memory & align to 4 byte
+				data = data + (type == CHAR ? sizeof(char) : sizeof(int)) * (token_val);
+				data = (char *)(((int)data + sizeof(int) - sizeof(char)) & (-sizeof(int)));
+			}
+			else {
+				printf("%d: bad array declaration\n", line);
+				exit(-1);
+			}
+			match(Num);
+			match(']');
+		}
+		else {
             // variable declaration
             current_id[Class] = Glo; // global variable
             current_id[Value] = (int)data; // assign memory address
+			current_id[Size] = 1;
             data = data + sizeof(int);
         }
 
@@ -1227,6 +1274,7 @@ int eval() {
                 printf(" %d\n", *pc);
             else
                 printf("\n");
+			printf("ax:%d stack:%d\n", ax, *sp);
         }
         if (op == IMM)       {ax = *pc++;}                                     // load immediate value to ax
         else if (op == LC)   {ax = *(char *)ax;}                               // load character to ax, address in ax
@@ -1299,6 +1347,8 @@ int main(int argc, char **argv)
         printf("usage: xc [-s] [-d] file ...\n");
         return -1;
     }
+	//assembly = 1;
+	//debug = 1;
 
     if ((fd = open(*argv, 0)) < 0) {
         printf("could not open(%s)\n", *argv);
@@ -1350,6 +1400,7 @@ int main(int argc, char **argv)
         current_id[Class] = Sys;
         current_id[Type] = INT;
         current_id[Value] = i++;
+		current_id[Size] = 0;
     }
 
     next(); current_id[Token] = Char; // handle void type
