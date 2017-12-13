@@ -463,10 +463,17 @@ void expression(int level) {
                     exit(-1);
                 }
 
-                // emit code, default behaviour is to load the value of the
-                // address which is stored in `ax`
-                expr_type = id[Type];
-                *++text = (expr_type == Char) ? LC : LI;
+				if (id[Size] == 0)
+				{
+					// emit code, default behaviour is to load the value of the
+					// address which is stored in `ax`
+					expr_type = id[Type];
+					*++text = (expr_type == Char) ? LC : LI;
+				}
+				else {
+					// for array type, value is address, do not need LC/LI
+					expr_type = id[Type] + PTR;
+				}
             }
         }
         else if (token == '(') {
@@ -835,11 +842,6 @@ void expression(int level) {
                 match(token);
             }
             else if (token == Brak) {
-				if (id != 0 && id[Size] > 1) {
-					--text; // delete last LC/LI
-					tmp = tmp + PTR;
-				}
-
                 // array access var[xx]
                 match(Brak);
                 *++text = PUSH;
@@ -998,7 +1000,7 @@ void enum_declaration() {
         current_id[Class] = Num;
         current_id[Type] = INT;
         current_id[Value] = i++;
-		current_id[Size] = 1;
+		current_id[Size] = 0;
 
         if (token == ',') {
             next();
@@ -1090,7 +1092,7 @@ void function_body() {
             current_id[BClass] = current_id[Class]; current_id[Class]  = Loc;
             current_id[BType]  = current_id[Type];  current_id[Type]   = type;
             current_id[BValue] = current_id[Value]; current_id[Value]  = ++pos_local;   // index of current parameter
-			current_id[BSize] = current_id[Size]; current_id[Size] = 1;
+			current_id[BSize] = current_id[Size]; current_id[Size] = 0;
 
 			if (token == Brak) {
 				// array declaration
@@ -1238,7 +1240,7 @@ void global_declaration() {
             // variable declaration
             current_id[Class] = Glo; // global variable
             current_id[Value] = (int)data; // assign memory address
-			current_id[Size] = 1;
+			current_id[Size] = 0;
             data = data + sizeof(int);
         }
 
