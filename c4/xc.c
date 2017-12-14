@@ -23,7 +23,7 @@ enum {
 };
 
 // fields of identifier
-enum {Token, Hash, Name, Type, Class, Value, Size, BType, BClass, BValue, BSize, IdSize};
+enum {Token, Hash, Name, Address, Type, Class, Value, Size, BType, BClass, BValue, BSize, IdSize};
 
 
 // types of variable/function
@@ -433,7 +433,7 @@ void expression(int level) {
                 else if (id[Class] == C_Fun) {
                     // function call
                     *++text = CALL;
-                    *++text = id[Value];
+					*++text = id[Value];
                 }
                 else {
                     printf("%d: bad function call\n", line);
@@ -1142,27 +1142,46 @@ void function_body() {
 }
 
 void function_declaration() {
-    // type func_name (...) {...}
-    //               | this part
+    // type func_name (...)
+	int *id;
+	id = current_id;
 
     match('(');
     function_parameter();
     match(')');
-    match('{');
-    function_body();
-    //match('}');
 
-    // unwind local variable declarations for all local variables.
-    current_id = symbols;
-    while (current_id[Token]) {
-        if (current_id[Class] == C_Loc) {
-            current_id[Class] = current_id[BClass];
-            current_id[Type]  = current_id[BType];
-            current_id[Value] = current_id[BValue];
+	if (token == ';') {
+		// declaration	
+		*++text = JMP;
+		*++text = 0;
+		// store jmp target address
+		id[Address] = (int)text;
+		//match(';');
+	}
+	else {
+		// define
+		match('{');
+
+		// set jmp target address
+		if (id[Address] != 0) {
+			*(int*)(id[Address]) = (int)(text + 1);
+			id[Address] = 0;
+		}
+
+		function_body();
+		//match('}');
+	}
+	// unwind local variable declarations for all local variables.
+	current_id = symbols;
+	while (current_id[Token]) {
+		if (current_id[Class] == C_Loc) {
+			current_id[Class] = current_id[BClass];
+			current_id[Type]  = current_id[BType];
+			current_id[Value] = current_id[BValue];
 			current_id[Size] = current_id[BSize];
-        }
-        current_id = current_id + IdSize;
-    }
+		}
+		current_id = current_id + IdSize;
+	}
 }
 
 void global_declaration() {
@@ -1230,7 +1249,7 @@ void global_declaration() {
             printf("%d: bad global declaration\n", line);
             exit(-1);
         }
-        if (current_id[Class]) {
+        if (current_id[Class] && current_id[Address] == 0) {
             // identifier exists
             printf("%d: duplicate global declaration\n", line);
             exit(-1);
