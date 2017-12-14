@@ -16,9 +16,10 @@ enum { LEA ,IMM ,JMP ,CALL,JZ  ,JNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PUSH,
 // tokens and classes (operators last and in precedence order)
 // copied from c4
 enum {
-  Num = 128, Fun, Sys, Glo, Loc, Id,
-  Char, Else, Enum, If, Int, Return, Sizeof, While,
-  Assign, Cond, Lor, Lan, Or, Xor, And, Eq, Ne, Lt, Gt, Le, Ge, Shl, Shr, Add, Sub, Mul, Div, Mod, Inc, Dec, Brak
+  C_Num = 128, C_Fun, C_Sys, C_Glo, C_Loc,
+  Id, Num, 
+  Char, Else, Enum, If, Int, Return, Sizeof, Struct, While,
+  Assign, Cond, Lor, Lan, Or, Xor, And, Eq, Ne, Lt, Gt, Le, Ge, Shl, Shr, Add, Sub, Mul, Div, Mod, Inc, Dec, Brak, Point
 };
 
 // fields of identifier
@@ -26,7 +27,7 @@ enum {Token, Hash, Name, Type, Class, Value, Size, BType, BClass, BValue, BSize,
 
 
 // types of variable/function
-enum { CHAR, INT, PTR };
+enum { CHAR, INT, STRUCT, PTR };
 
 // type of declaration.
 enum {Global, Local};
@@ -295,6 +296,10 @@ void next() {
             token = Cond;
             return;
         }
+		else if (token == '.') {
+			token = Point;
+			return;
+		}
         else if (token == '~' || token == ';' || token == '{' || token == '}' || token == '(' || token == ')' || token == ']' || token == ',' || token == ':') {
             // directly return the character as token;
             return;
@@ -421,11 +426,11 @@ void expression(int level) {
                 match(')');
 
                 // emit code
-                if (id[Class] == Sys) {
+                if (id[Class] == C_Sys) {
                     // system functions
                     *++text = id[Value];
                 }
-                else if (id[Class] == Fun) {
+                else if (id[Class] == C_Fun) {
                     // function call
                     *++text = CALL;
                     *++text = id[Value];
@@ -442,7 +447,7 @@ void expression(int level) {
                 }
                 expr_type = id[Type];
             }
-            else if (id[Class] == Num) {
+            else if (id[Class] == C_Num) {
                 // enum variable
                 *++text = IMM;
                 *++text = id[Value];
@@ -450,11 +455,11 @@ void expression(int level) {
             }
             else {
                 // variable
-                if (id[Class] == Loc) {
+                if (id[Class] == C_Loc) {
                     *++text = LEA;
                     *++text = index_of_bp - id[Value];
                 }
-                else if (id[Class] == Glo) {
+                else if (id[Class] == C_Glo) {
                     *++text = IMM;
                     *++text = id[Value];
                 }
@@ -997,7 +1002,7 @@ void enum_declaration() {
             next();
         }
 
-        current_id[Class] = Num;
+        current_id[Class] = C_Num;
         current_id[Type] = INT;
         current_id[Value] = i++;
 		current_id[Size] = 0;
@@ -1006,6 +1011,10 @@ void enum_declaration() {
             next();
         }
     }
+}
+
+void struct_declaration() {
+
 }
 
 void function_parameter() {
@@ -1033,14 +1042,14 @@ void function_parameter() {
             printf("%d: bad parameter declaration\n", line);
             exit(-1);
         }
-        if (current_id[Class] == Loc) {
+        if (current_id[Class] == C_Loc) {
             printf("%d: duplicate parameter declaration\n", line);
             exit(-1);
         }
 
         match(Id);
         // store the local variable
-        current_id[BClass] = current_id[Class]; current_id[Class]  = Loc;
+        current_id[BClass] = current_id[Class]; current_id[Class]  = C_Loc;
         current_id[BType]  = current_id[Type];  current_id[Type]   = type;
         current_id[BValue] = current_id[Value]; current_id[Value]  = params++;   // index of current parameter
 
@@ -1081,7 +1090,7 @@ void function_body() {
                 printf("%d: bad local declaration\n", line);
                 exit(-1);
             }
-            if (current_id[Class] == Loc) {
+            if (current_id[Class] == C_Loc) {
                 // identifier exists
                 printf("%d: duplicate local declaration\n", line);
                 exit(-1);
@@ -1089,7 +1098,7 @@ void function_body() {
             match(Id);
 
             // store the local variable
-            current_id[BClass] = current_id[Class]; current_id[Class]  = Loc;
+            current_id[BClass] = current_id[Class]; current_id[Class]  = C_Loc;
             current_id[BType]  = current_id[Type];  current_id[Type]   = type;
             current_id[BValue] = current_id[Value]; current_id[Value]  = ++pos_local;   // index of current parameter
 			current_id[BSize] = current_id[Size]; current_id[Size] = 0;
@@ -1146,7 +1155,7 @@ void function_declaration() {
     // unwind local variable declarations for all local variables.
     current_id = symbols;
     while (current_id[Token]) {
-        if (current_id[Class] == Loc) {
+        if (current_id[Class] == C_Loc) {
             current_id[Class] = current_id[BClass];
             current_id[Type]  = current_id[BType];
             current_id[Value] = current_id[BValue];
@@ -1180,6 +1189,24 @@ void global_declaration() {
         return;
     }
 
+	// parse struct, this should be treated alone
+	if (token == Struct)
+	{
+		match(Struct);
+		if (token != '{')
+		{
+			match(Id);
+		}
+		if (token == '{')
+		{
+			match('{');
+			struct_declaration();
+			match('}');
+		}
+		match(';');
+		return;
+	}
+
     // parse type information
     if (token == Int) {
         match(Int);
@@ -1212,7 +1239,7 @@ void global_declaration() {
         current_id[Type] = type;
 
         if (token == '(') {
-            current_id[Class] = Fun;
+            current_id[Class] = C_Fun;
             current_id[Value] = (int)(text + 1); // the memory address of function
 			current_id[Size] = 0;
             function_declaration();
@@ -1221,7 +1248,7 @@ void global_declaration() {
 			// array declaration
 			match(Brak);
 			if (token == Num && token_val >	1) {
-				current_id[Class] = Glo; // global variable
+				current_id[Class] = C_Glo; // global variable
 				current_id[Value] = (int)data; // assign memory address
 				current_id[Size] = token_val;
 				
@@ -1238,7 +1265,7 @@ void global_declaration() {
 		}
 		else {
             // variable declaration
-            current_id[Class] = Glo; // global variable
+            current_id[Class] = C_Glo; // global variable
             current_id[Value] = (int)data; // assign memory address
 			current_id[Size] = 0;
             data = data + sizeof(int);
@@ -1385,7 +1412,7 @@ int main(int argc, char **argv)
 
     old_text = text;
 
-    src = "char else enum if int return sizeof while "
+    src = "char else enum if int return sizeof struct while "
           "open read close printf malloc memset memcmp exit void main";
 
      // add keywords to symbol table
@@ -1399,7 +1426,7 @@ int main(int argc, char **argv)
     i = OPEN;
     while (i <= EXIT) {
         next();
-        current_id[Class] = Sys;
+        current_id[Class] = C_Sys;
         current_id[Type] = INT;
         current_id[Value] = i++;
 		current_id[Size] = 0;
