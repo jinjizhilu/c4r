@@ -4,6 +4,18 @@ int array[10];
 
 int fibonacci(int i);
 
+struct Struct_test
+{
+	int a, *b;
+	char c, *d;
+};
+
+struct Struct_test2
+{
+	int *a;
+	char *b;
+};
+
 void test()
 {
 	int i;
@@ -13,6 +25,9 @@ void test()
 		i = i + 1;
 	}
 }
+
+struct Struct_test s_a;
+struct Struct_test2 s_b;
 
 int fibonacci(int i) {
     if (i <= 1) {

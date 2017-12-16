@@ -23,8 +23,10 @@ enum {
 };
 
 // fields of identifier
-enum {Token, Hash, Name, Address, Type, Class, Value, Size, BType, BClass, BValue, BSize, IdSize};
+enum {Token, Hash, Name, Address, Type, Class, Value, Size, BType, BClass, BValue, BStruct, BSize, IdSize};
 
+enum {S_Id, S_Count, S_Size, S_HeadSize};
+enum {S_MemId, S_MemType, S_MemAddr, S_MemSize};
 
 // types of variable/function
 enum { CHAR, INT, STRUCT, PTR };
@@ -45,6 +47,8 @@ int *pc, *bp, *sp, ax, cycle; // virtual machine registers
 
 int *current_id, // current parsed ID
     *symbols,    // symbol table
+	*current_struct, // current parsed struct
+	*structs,	 // struct table
     line,        // line number of source code
     token_val;   // value of current token (mainly for number)
 
@@ -314,6 +318,19 @@ void match(int tk) {
         printf("%d: expected token: %d\n", line, tk);
         exit(-1);
     }
+}
+
+int find_struct(int *id) {
+	int *struct_item;
+	struct_item = structs;
+
+	while (struct_item[S_Id] != 0) {
+		if (struct_item[S_Id] == (int)id) {
+			return (int)struct_item;
+		}
+		struct_item = struct_item + S_HeadSize + struct_item[S_Count] * S_MemSize;
+	}
+	return 0;
 }
 
 void expression(int level) {
@@ -1013,8 +1030,58 @@ void enum_declaration() {
     }
 }
 
-void struct_declaration() {
+void struct_declaration(int *id) {
+	// parse struct id {int a, char b, int* c, ...}
+	int *struct_head, type;
 
+	struct_head = current_struct;
+	current_struct[S_Id] = (int)id;
+	current_struct[S_Count] = 0;
+	current_struct[S_Size] = 0;
+	current_struct = current_struct + S_HeadSize;
+
+	while (token != '}') {
+		// parse type information
+		if (token == Int) {
+			match(Int);
+		}
+		else if (token == Char) {
+			match(Char);
+			basetype = CHAR;
+		}
+
+		// parse the comma seperated variable declaration.
+		while (token != ';') {
+			type = basetype;
+			// parse pointer type, note that there may exist `int ****x;`
+			while (token == Mul) {
+				match(Mul);
+				type = type + PTR;
+			}
+
+			if (token != Id) {
+				// invalid declaration
+				printf("%d: bad struct member declaration\n", line);
+				exit(-1);
+			}
+
+			// struct member declaration
+			current_struct[S_MemId] = (int)current_id;
+			current_struct[S_MemType] = type;
+			current_struct[S_MemAddr] = struct_head[S_Size];
+			struct_head[S_Size] = struct_head[S_Size] + (type == CHAR ? sizeof(char) : sizeof(int));
+			struct_head[S_Count] = struct_head[S_Count] + 1;
+			current_struct = current_struct + S_MemSize;
+
+			match(Id);
+
+			if (token == ',') {
+				match(',');
+			}
+		}
+		match(';');
+	}
+	
 }
 
 void function_parameter() {
@@ -1186,7 +1253,7 @@ void function_declaration() {
 
 void global_declaration() {
     // int [*]id [; | (...) {...}]
-    int type; // tmp, actual type for variable
+    int type, *id, *struct_item; // tmp, actual type for variable
 
     basetype = INT;
 
@@ -1209,18 +1276,48 @@ void global_declaration() {
     }
 
 	// parse struct, this should be treated alone
-	if (token == Struct)
-	{
+	if (token == Struct) {
 		match(Struct);
-		if (token != '{')
-		{
-			match(Id);
-		}
-		if (token == '{')
-		{
+		
+		id = current_id;
+		struct_item = (int*)find_struct(id);
+		basetype = STRUCT;
+
+		match(Id);
+
+		if (token == '{') {
 			match('{');
-			struct_declaration();
+			struct_declaration(id);
 			match('}');
+		}
+		else {
+			// standalone struct variable define
+			while (token != ';') {
+				type = basetype;
+				// parse pointer type, note that there may exist `int ****x;`
+				while (token == Mul) {
+					match(Mul);
+					type = type + PTR;
+				}
+
+				if (struct_item == 0) {
+					// invalid struct type
+					printf("%d: undeclared struct type.\n", line);
+					exit(-1);
+				}
+
+				current_id[Class] = C_Glo; // global variable
+				current_id[Value] = (int)data; // assign memory address
+				current_id[Address] = (int)struct_item;
+				current_id[Size] = 0;
+				data = data + (type == STRUCT ? struct_item[S_Size] : sizeof(int));
+
+				match(Id);
+
+				if (token == ',') {
+					match(',');
+				}
+			}
 		}
 		match(';');
 		return;
@@ -1249,6 +1346,7 @@ void global_declaration() {
             printf("%d: bad global declaration\n", line);
             exit(-1);
         }
+		// current_id[Address] != 0 means function declaration has been processed
         if (current_id[Class] && current_id[Address] == 0) {
             // identifier exists
             printf("%d: duplicate global declaration\n", line);
@@ -1423,11 +1521,18 @@ int main(int argc, char **argv)
         printf("could not malloc(%d) for symbol table\n", poolsize);
         return -1;
     }
+	if (!(structs = malloc(poolsize))) {
+		printf("could not malloc(%d) for struct table\n", poolsize);
+		return -1;
+	}
 
     memset(text, 0, poolsize);
     memset(data, 0, poolsize);
     memset(stack, 0, poolsize);
     memset(symbols, 0, poolsize);
+    memset(structs, 0, poolsize);
+
+	current_struct = structs;
 
     old_text = text;
 
