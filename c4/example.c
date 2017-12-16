@@ -41,6 +41,11 @@ int main()
     int i, j[10], *p;
 	p = j;
     i = 0;
+
+	s_a.d = 3192432;
+	s_b.a = 532;
+	printf("s_a.d: %d, s_b.a: %d\n", s_a.d, s_b.a);
+
     while (i <= 10) {
         printf("fibonacci(%2d) = %d\n", i, fibonacci(i));
         i = i + 1;

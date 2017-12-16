@@ -23,7 +23,7 @@ enum {
 };
 
 // fields of identifier
-enum {Token, Hash, Name, Address, Type, Class, Value, Size, BType, BClass, BValue, BStruct, BSize, IdSize};
+enum {Token, Hash, Name, Address, Type, Class, Value, Size, BType, BClass, BValue, BSize, IdSize};
 
 enum {S_Id, S_Count, S_Size, S_HeadSize};
 enum {S_MemId, S_MemType, S_MemAddr, S_MemSize};
@@ -333,6 +333,20 @@ int find_struct(int *id) {
 	return 0;
 }
 
+int find_struct_member(int *struct_item, int *id) {
+	int *struct_end;
+	struct_end = struct_item + S_HeadSize + struct_item[S_Count] * S_MemSize;
+	struct_item = struct_item + S_HeadSize;
+
+	while (struct_item < struct_end) {
+		if (struct_item[S_MemId] == (int)id) {
+			return (int)struct_item;
+		}
+		struct_item = struct_item + S_MemSize;
+	}
+	return 0;
+}
+
 void expression(int level) {
     // expressions have various format.
     // but majorly can be divided into two parts: unit and operator
@@ -348,9 +362,7 @@ void expression(int level) {
     // 2. expr ::= unit_unary (bin_op unit_unary ...)
 
     // unit_unary()
-    int *id;
-    int tmp;
-    int *addr;
+    int *id, tmp, *addr, *struct_item;
 	id = 0;
 
     {
@@ -420,9 +432,9 @@ void expression(int level) {
             // 1. function call
             // 2. Enum variable
             // 3. global/local variable
-            match(Id);
 
-            id = current_id;
+			id = current_id;
+            match(Id);
 
             if (token == '(') {
                 // function call
@@ -885,6 +897,32 @@ void expression(int level) {
 				*++text = ADD;
 				*++text = (expr_type == CHAR) ? LC : LI;
             }
+			else if (token == Point) {
+				// struct member access var1.var2
+
+				if ((current_id[Type] % PTR != STRUCT) || tmp != STRUCT || current_id[Address] == 0) {
+					printf("%d: struct type expected\n", line);
+					exit(-1);
+				}
+				struct_item = (int*)current_id[Address];
+				match(Point);
+
+				struct_item = (int*)find_struct_member(struct_item, current_id);
+				match(Id);
+
+				expr_type = struct_item[S_MemType];
+
+				if (*text == LC || *text == LI) {
+					*text = PUSH;
+				} else {
+					printf("%d: bad lvalue in assignment\n", line);
+					exit(-1);
+				}
+				*++text = IMM;
+				*++text = struct_item[S_MemAddr];
+				*++text = ADD;
+				*++text = (expr_type == CHAR) ? LC : LI;
+			}
             else {
                 printf("%d: compiler error, token = %d\n", line, token);
                 exit(-1);
@@ -1114,11 +1152,12 @@ void function_parameter() {
             exit(-1);
         }
 
-        match(Id);
         // store the local variable
         current_id[BClass] = current_id[Class]; current_id[Class]  = C_Loc;
         current_id[BType]  = current_id[Type];  current_id[Type]   = type;
         current_id[BValue] = current_id[Value]; current_id[Value]  = params++;   // index of current parameter
+
+		match(Id);
 
         if (token == ',') {
             match(',');
@@ -1162,13 +1201,14 @@ void function_body() {
                 printf("%d: duplicate local declaration\n", line);
                 exit(-1);
             }
-            match(Id);
 
             // store the local variable
             current_id[BClass] = current_id[Class]; current_id[Class]  = C_Loc;
             current_id[BType]  = current_id[Type];  current_id[Type]   = type;
             current_id[BValue] = current_id[Value]; current_id[Value]  = ++pos_local;   // index of current parameter
 			current_id[BSize] = current_id[Size]; current_id[Size] = 0;
+
+			match(Id);
 
 			if (token == Brak) {
 				// array declaration
@@ -1309,6 +1349,7 @@ void global_declaration() {
 				current_id[Class] = C_Glo; // global variable
 				current_id[Value] = (int)data; // assign memory address
 				current_id[Address] = (int)struct_item;
+				current_id[Type] = type;
 				current_id[Size] = 0;
 				data = data + (type == STRUCT ? struct_item[S_Size] : sizeof(int));
 
