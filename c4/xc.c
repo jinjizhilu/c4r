@@ -23,7 +23,7 @@ enum {
 };
 
 // fields of identifier
-enum {Token, Hash, Name, Address, Type, Class, Value, Size, BType, BClass, BValue, BSize, IdSize};
+enum {Token, Hash, Name, FuncAddr, StructAddr, Type, Class, Value, Size, BStructAddr, BType, BClass, BValue, BSize, IdSize};
 
 enum {S_Id, S_Count, S_Size, S_HeadSize};
 enum {S_MemId, S_MemType, S_MemAddr, S_MemSize};
@@ -343,6 +343,25 @@ int find_struct_member(int *struct_item, int *id) {
 			return (int)struct_item;
 		}
 		struct_item = struct_item + S_MemSize;
+	}
+	return 0;
+}
+
+int get_size(int type, int data) {
+	int *addr;
+
+	if (type >= PTR) {
+		return sizeof(int);
+	}
+	else if (type == CHAR) {
+		return sizeof(char);
+	}
+	else if (type == INT) {
+		return sizeof(int);
+	}
+	else if (type == STRUCT) {
+		addr = (int*)data;
+		return addr[S_Size];
 	}
 	return 0;
 }
@@ -900,11 +919,11 @@ void expression(int level) {
 			else if (token == Point) {
 				// struct member access var1.var2
 
-				if ((current_id[Type] % PTR != STRUCT) || tmp != STRUCT || current_id[Address] == 0) {
+				if ((current_id[Type] % PTR != STRUCT) || tmp != STRUCT || current_id[StructAddr] == 0) {
 					printf("%d: struct type expected\n", line);
 					exit(-1);
 				}
-				struct_item = (int*)current_id[Address];
+				struct_item = (int*)current_id[StructAddr];
 				match(Point);
 
 				struct_item = (int*)find_struct_member(struct_item, current_id);
@@ -1175,9 +1194,9 @@ void function_body() {
     // 2. statements
     // }
 
-    int pos_local; // position of local variables on the stack.
-    int type;
-	int *struct_item;
+    int pos_local, type, *struct_item;; // position of local variables on the stack.
+
+	struct_item = 0;
     pos_local = index_of_bp;
 
     while (token == Int || token == Char || token == Struct) {
@@ -1217,9 +1236,10 @@ void function_body() {
             current_id[BType]  = current_id[Type];  current_id[Type]   = type;
             current_id[BValue] = current_id[Value]; current_id[Value]  = ++pos_local;   // index of current parameter
 			current_id[BSize] = current_id[Size]; current_id[Size] = 0;
+			current_id[BStructAddr] = current_id[StructAddr]; current_id[StructAddr] = 0;
 
 			if (basetype == STRUCT) {
-				current_id[Address] = (int)struct_item;
+				current_id[StructAddr] = (int)struct_item;
 				pos_local = pos_local - 1 + struct_item[S_Size] / 4;
 				current_id[Value] = pos_local;
 			}
@@ -1229,11 +1249,11 @@ void function_body() {
 			if (token == Brak) {
 				// array declaration
 				match(Brak);
-				if (token == Num && token_val > 1) {
+				if (token == Num && token_val > 0) {
 					current_id[Size] = token_val;
 
 					// allocate memory & align to 4 byte
-					pos_local = pos_local - 1 + ((type == CHAR ? sizeof(char) : sizeof(int)) * (token_val) + sizeof(int) - sizeof(char)) / 4;
+					pos_local = pos_local - 1 + (get_size(type, (int)struct_item) * (token_val) + sizeof(int) - sizeof(char)) / 4;
 					current_id[Value] = pos_local;
 				}
 				else {
@@ -1278,7 +1298,7 @@ void function_declaration() {
 		*++text = JMP;
 		*++text = 0;
 		// store jmp target address
-		id[Address] = (int)text;
+		id[FuncAddr] = (int)text;
 		//match(';');
 	}
 	else {
@@ -1286,9 +1306,9 @@ void function_declaration() {
 		match('{');
 
 		// set jmp target address
-		if (id[Address] != 0) {
-			*(int*)(id[Address]) = (int)(text + 1);
-			id[Address] = 0;
+		if (id[FuncAddr] != 0) {
+			*(int*)(id[FuncAddr]) = (int)(text + 1);
+			id[FuncAddr] = 0;
 		}
 
 		function_body();
@@ -1302,6 +1322,7 @@ void function_declaration() {
 			current_id[Type]  = current_id[BType];
 			current_id[Value] = current_id[BValue];
 			current_id[Size] = current_id[BSize];
+			current_id[StructAddr] = current_id[BStructAddr];
 		}
 		current_id = current_id + IdSize;
 	}
@@ -1311,6 +1332,7 @@ void global_declaration() {
     // int [*]id [; | (...) {...}]
     int type, *id, *struct_item; // tmp, actual type for variable
 
+	struct_item = 0;
     basetype = INT;
 
     // parse enum, this should be treated alone.
@@ -1341,47 +1363,21 @@ void global_declaration() {
 
 		match(Id);
 
+		// struct declaration
 		if (token == '{') {
 			match('{');
 			struct_declaration(id);
 			match('}');
+			match(';');
+			return;
 		}
-		else {
-			// standalone struct variable define
-			while (token != ';') {
-				type = basetype;
-				// parse pointer type, note that there may exist `int ****x;`
-				while (token == Mul) {
-					match(Mul);
-					type = type + PTR;
-				}
-
-				if (struct_item == 0) {
-					// invalid struct type
-					printf("%d: undeclared struct type.\n", line);
-					exit(-1);
-				}
-
-				current_id[Class] = C_Glo; // global variable
-				current_id[Value] = (int)data; // assign memory address
-				current_id[Address] = (int)struct_item;
-				current_id[Type] = type;
-				current_id[Size] = 0;
-				data = data + (type == STRUCT ? struct_item[S_Size] : sizeof(int));
-
-				match(Id);
-
-				if (token == ',') {
-					match(',');
-				}
-			}
-		}
-		match(';');
-		return;
 	}
 
     // parse type information
-    if (token == Int) {
+	if (basetype == STRUCT) {
+		// struct variables would be handled below
+	}
+    else if (token == Int) {
         match(Int);
     }
     else if (token == Char) {
@@ -1403,31 +1399,34 @@ void global_declaration() {
             printf("%d: bad global declaration\n", line);
             exit(-1);
         }
-		// current_id[Address] != 0 means function declaration has been processed
-        if (current_id[Class] && current_id[Address] == 0) {
+		// current_id[FuncAddr] != 0 means function declaration has been processed
+        if (current_id[Class] && current_id[FuncAddr] == 0) {
             // identifier exists
             printf("%d: duplicate global declaration\n", line);
             exit(-1);
         }
-        match(Id);
-        current_id[Type] = type;
+		id = current_id;
+		match(Id); 
+
+        id[Type] = type;
+		id[StructAddr] = (int)struct_item;
 
         if (token == '(') {
-            current_id[Class] = C_Fun;
-            current_id[Value] = (int)(text + 1); // the memory address of function
-			current_id[Size] = 0;
+            id[Class] = C_Fun;
+            id[Value] = (int)(text + 1); // the memory address of function
+			id[Size] = 0;
             function_declaration();
         } 
 		else if (token == Brak) {
 			// array declaration
 			match(Brak);
-			if (token == Num && token_val >	1) {
-				current_id[Class] = C_Glo; // global variable
-				current_id[Value] = (int)data; // assign memory address
-				current_id[Size] = token_val;
+			if (token == Num && token_val >	0) {
+				id[Class] = C_Glo; // global variable
+				id[Value] = (int)data; // assign memory address
+				id[Size] = token_val;
 				
 				// allocate memory & align to 4 byte
-				data = data + (type == CHAR ? sizeof(char) : sizeof(int)) * (token_val);
+				data = data + get_size(type, (int)struct_item) * (token_val);
 				data = (char *)(((int)data + sizeof(int) - sizeof(char)) & (-sizeof(int)));
 			}
 			else {
@@ -1437,11 +1436,11 @@ void global_declaration() {
 			match(Num);
 			match(']');
 		}
-		else {
+		else if (token == ',' || token == ';') {
             // variable declaration
-            current_id[Class] = C_Glo; // global variable
-            current_id[Value] = (int)data; // assign memory address
-			current_id[Size] = 0;
+            id[Class] = C_Glo; // global variable
+            id[Value] = (int)data; // assign memory address
+			id[Size] = 0;
             data = data + sizeof(int);
         }
 
