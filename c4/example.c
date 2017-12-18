@@ -39,12 +39,15 @@ int fibonacci(int i) {
 int main()
 {
     int i, j[10], *p;
+	struct Struct_test s_c;
+
 	p = j;
     i = 0;
 
 	s_a.d = 3192432;
 	s_b.a = 532;
-	printf("s_a.d: %d, s_b.a: %d\n", s_a.d, s_b.a);
+	s_c.a = 4523;
+	printf("s_a.d: %d, s_c.a: %d\n", s_a.d, s_c.a);
 
     while (i <= 10) {
         printf("fibonacci(%2d) = %d\n", i, fibonacci(i));

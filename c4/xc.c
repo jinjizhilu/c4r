@@ -1177,11 +1177,15 @@ void function_body() {
 
     int pos_local; // position of local variables on the stack.
     int type;
+	int *struct_item;
     pos_local = index_of_bp;
 
-    while (token == Int || token == Char) {
+    while (token == Int || token == Char || token == Struct) {
         // local variable declaration, just like global ones.
-        basetype = (token == Int) ? INT : CHAR;
+        basetype = INT;
+		if (token == Char) basetype = CHAR;
+		if (token == Struct) basetype = STRUCT;
+
         match(token);
 
         while (token != ';') {
@@ -1196,6 +1200,12 @@ void function_body() {
                 printf("%d: bad local declaration\n", line);
                 exit(-1);
             }
+
+			if (basetype == STRUCT) {
+				struct_item = (int*)find_struct(current_id);
+				match(Id);
+			}
+
             if (current_id[Class] == C_Loc) {
                 // identifier exists
                 printf("%d: duplicate local declaration\n", line);
@@ -1207,6 +1217,12 @@ void function_body() {
             current_id[BType]  = current_id[Type];  current_id[Type]   = type;
             current_id[BValue] = current_id[Value]; current_id[Value]  = ++pos_local;   // index of current parameter
 			current_id[BSize] = current_id[Size]; current_id[Size] = 0;
+
+			if (basetype == STRUCT) {
+				current_id[Address] = (int)struct_item;
+				pos_local = pos_local - 1 + struct_item[S_Size] / 4;
+				current_id[Value] = pos_local;
+			}
 
 			match(Id);
 
