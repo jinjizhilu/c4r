@@ -16,17 +16,17 @@ struct Struct_test2
 	char *b;
 };
 
-struct Struct_test s_a2;
-struct Struct_test2 s_a;
+struct Struct_test *s_a;
+struct Struct_test s_a2[10];
 
 void test()
 {
-	//struct Struct_test s_a;
+	struct Struct_test s_a;
 	int i;
 	i = 0;
-	//s_a.a = 53253252;
+	s_a.a = 53253252;
 	//s_a.c = 643090;
-	printf("s_a.d: %d, s_a.a: %d\n", s_a.b, s_a.a);
+	printf("s_a.d: %d, s_a.a: %d\n", s_a.d, s_a.a);
 	while (i <= 10) {
 		printf("fibonacci(%2d) = %d\n", i, fibonacci(i));
 		i = i + 1;
@@ -47,9 +47,11 @@ int main()
 	p = j;
     i = 0;
 
+	s_a = &s_a2[0];
+	(*s_a).a = 63242;
 	//s_a.d = 127;
-	s_a.b = 532;
-	s_a.a = 4523;
+	//s_a.d = 532;
+	//s_a.a = 4523;
 	//s_a.c = 5;
 	//printf("s_a.d: %d, s_a.a: %d\n", s_a.b, s_a.a);
 
@@ -63,9 +65,10 @@ int main()
 	i = 0;
 	while (i < 10)
 	{
-		array[i] = i;
-		p[i] = i;
-		printf("test: %d\n", array[i]);
+		s_a = &s_a2[i];
+		(*s_a).a = i * i;
+		(*s_a).a = (*s_a).a * 2;
+		printf("test: %d\n", (*s_a).a);
 		printf("test: %d\n", j[i]);
 		i++;
 	}

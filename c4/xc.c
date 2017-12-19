@@ -54,6 +54,7 @@ int *current_id, // current parsed ID
 
 int basetype;    // the type of a declaration, make it global for convenience
 int expr_type;   // the type of an expression
+int *last_struct;// to keep value between recursive expression processing
 
 // function frame
 //
@@ -521,6 +522,8 @@ void expression(int level) {
                     exit(-1);
                 }
 
+				last_struct = (int*)id[StructAddr];
+
 				if (id[Size] == 0)
 				{
 					// emit code, default behaviour is to load the value of the
@@ -924,11 +927,11 @@ void expression(int level) {
 			else if (token == Point) {
 				// struct member access var1.var2
 
-				if ((current_id[Type] % PTR != STRUCT) || tmp != STRUCT || current_id[StructAddr] == 0) {
+				if (tmp != STRUCT || last_struct == 0) {
 					printf("%d: struct type expected\n", line);
 					exit(-1);
 				}
-				struct_item = (int*)current_id[StructAddr];
+				struct_item = (int*)last_struct;
 				match(Point);
 
 				struct_item = (int*)find_struct_member(struct_item, current_id);
