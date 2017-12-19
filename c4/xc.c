@@ -364,6 +364,11 @@ int get_size(int type, int data) {
 		return addr[S_Size];
 	}
 	return 0;
+} 
+
+int align_to_int(int address) {
+	address = (address + sizeof(int) - 1) / sizeof(int);
+	return address;
 }
 
 void expression(int level) {
@@ -414,7 +419,7 @@ void expression(int level) {
             // append the end of string character '\0', all the data are default
             // to 0, so just move data one position forward.
 			// align to 4 byte
-            data = (char *)(((int)data + sizeof(int)) & (-sizeof(int)));
+            data = (char *)(align_to_int((int)data + sizeof(char)) * sizeof(int));
             expr_type = PTR;
         }
         else if (token == Sizeof) {
@@ -1099,6 +1104,7 @@ void struct_declaration(int *id) {
 
 	while (token != '}') {
 		// parse type information
+		basetype = INT;	
 		if (token == Int) {
 			match(Int);
 		}
@@ -1194,7 +1200,7 @@ void function_body() {
     // 2. statements
     // }
 
-    int pos_local, type, *struct_item;; // position of local variables on the stack.
+    int pos_local, old_pos, type, *struct_item;; // position of local variables on the stack.
 
 	struct_item = 0;
     pos_local = index_of_bp;
@@ -1231,6 +1237,7 @@ void function_body() {
                 exit(-1);
             }
 
+			old_pos = pos_local;
             // store the local variable
             current_id[BClass] = current_id[Class]; current_id[Class]  = C_Loc;
             current_id[BType]  = current_id[Type];  current_id[Type]   = type;
@@ -1240,7 +1247,7 @@ void function_body() {
 
 			if (basetype == STRUCT) {
 				current_id[StructAddr] = (int)struct_item;
-				pos_local = pos_local - 1 + struct_item[S_Size] / 4;
+				pos_local = old_pos + align_to_int(struct_item[S_Size]);
 				current_id[Value] = pos_local;
 			}
 
@@ -1253,7 +1260,7 @@ void function_body() {
 					current_id[Size] = token_val;
 
 					// allocate memory & align to 4 byte
-					pos_local = pos_local - 1 + (get_size(type, (int)struct_item) * (token_val) + sizeof(int) - sizeof(char)) / 4;
+					pos_local = old_pos + align_to_int(get_size(type, (int)struct_item) * (token_val));
 					current_id[Value] = pos_local;
 				}
 				else {
@@ -1427,7 +1434,7 @@ void global_declaration() {
 				
 				// allocate memory & align to 4 byte
 				data = data + get_size(type, (int)struct_item) * (token_val);
-				data = (char *)(((int)data + sizeof(int) - sizeof(char)) & (-sizeof(int)));
+				data = (char*)(align_to_int((int)data) * sizeof(int));
 			}
 			else {
 				printf("%d: bad array declaration\n", line);
@@ -1441,7 +1448,8 @@ void global_declaration() {
             id[Class] = C_Glo; // global variable
             id[Value] = (int)data; // assign memory address
 			id[Size] = 0;
-            data = data + sizeof(int);
+			data = data + get_size(type, (int)struct_item);
+			data = (char*)(align_to_int((int)data) * sizeof(int));
         }
 
         if (token == ',') {

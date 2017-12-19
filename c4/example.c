@@ -6,7 +6,7 @@ int fibonacci(int i);
 
 struct Struct_test
 {
-	int a, *b;
+	int a, b;
 	char c, *d;
 };
 
@@ -16,21 +16,22 @@ struct Struct_test2
 	char *b;
 };
 
-struct Struct_test s_a;
-struct Struct_test2 s_b;
+struct Struct_test s_a2;
+struct Struct_test2 s_a;
 
 void test()
 {
-	struct Struct_test s_a;
+	//struct Struct_test s_a;
 	int i;
 	i = 0;
-	s_a.a = 53253252;
-	s_a.c = 643090;
+	//s_a.a = 53253252;
+	//s_a.c = 643090;
+	printf("s_a.d: %d, s_a.a: %d\n", s_a.b, s_a.a);
 	while (i <= 10) {
 		printf("fibonacci(%2d) = %d\n", i, fibonacci(i));
 		i = i + 1;
 	}
-	printf("s_a.d: %d, s_a.a: %d\n", s_a.c, s_a.a);
+	//printf("s_a.d: %d, s_a.a: %d\n", s_a.c, s_a.a);
 }
 
 int fibonacci(int i) {
@@ -50,7 +51,7 @@ int main()
 	s_a.b = 532;
 	s_a.a = 4523;
 	//s_a.c = 5;
-	printf("s_a.d: %d, s_a.a: %d\n", s_a.b, s_a.a);
+	//printf("s_a.d: %d, s_a.a: %d\n", s_a.b, s_a.a);
 
     while (i <= 10) {
         printf("fibonacci(%2d) = %d\n", i, fibonacci(i));
