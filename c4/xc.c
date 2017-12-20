@@ -23,10 +23,10 @@ enum {
 };
 
 // fields of identifier
-enum {Token, Hash, Name, FuncAddr, StructAddr, Type, Class, Value, Size, BStructAddr, BType, BClass, BValue, BSize, IdSize};
+enum {Token, Hash, Name, FuncAddr, StructId, Type, Class, Value, Size, BStructId, BType, BClass, BValue, BSize, IdSize};
 
 enum {S_Id, S_Count, S_Size, S_HeadSize};
-enum {S_MemId, S_MemType, S_MemAddr, S_MemSize};
+enum {S_MemId, S_MemType, S_MemAddr, S_MemStructId, S_MemSize};
 
 // types of variable/function
 enum { CHAR, INT, STRUCT, PTR };
@@ -372,6 +372,19 @@ int align_to_int(int address) {
 	return address;
 }
 
+int assign_type_check(int left, int right) {
+	if (left >= PTR && right == INT) {
+		return 1;
+	}
+	if ((left >= PTR && right >= PTR) && left != right) {
+		return 0;
+	}
+	if (left == STRUCT || right == STRUCT) {
+		return 0;
+	}
+	return 1;
+}
+
 void expression(int level) {
     // expressions have various format.
     // but majorly can be divided into two parts: unit and operator
@@ -458,6 +471,7 @@ void expression(int level) {
             // 2. Enum variable
             // 3. global/local variable
 
+			last_struct = 0;
 			id = current_id;
             match(Id);
 
@@ -522,7 +536,7 @@ void expression(int level) {
                     exit(-1);
                 }
 
-				last_struct = (int*)id[StructAddr];
+				last_struct = (int*)find_struct((int*)id[StructId]);
 
 				if (id[Size] == 0)
 				{
@@ -679,6 +693,11 @@ void expression(int level) {
                     exit(-1);
                 }
                 expression(Assign);
+
+				if (assign_type_check(tmp, expr_type) == 0) {
+					printf("%d: unmatched type in assign\n", line);
+					exit(-1);
+				}
 
                 expr_type = tmp;
                 *++text = (expr_type == CHAR) ? SC : SI;
@@ -939,6 +958,10 @@ void expression(int level) {
 
 				expr_type = struct_item[S_MemType];
 
+				if (expr_type == STRUCT) {
+					last_struct = (int*)find_struct((int*)struct_item[S_MemStructId]);
+				}
+
 				if (*text == LC || *text == LI) {
 					*text = PUSH;
 				} else {
@@ -1097,7 +1120,7 @@ void enum_declaration() {
 
 void struct_declaration(int *id) {
 	// parse struct id {int a, char b, int* c, ...}
-	int *struct_head, type;
+	int *struct_head, *struct_item, *struct_id, type;
 
 	struct_head = current_struct;
 	current_struct[S_Id] = (int)id;
@@ -1107,14 +1130,11 @@ void struct_declaration(int *id) {
 
 	while (token != '}') {
 		// parse type information
-		basetype = INT;	
-		if (token == Int) {
-			match(Int);
-		}
-		else if (token == Char) {
-			match(Char);
-			basetype = CHAR;
-		}
+		basetype = INT;
+		if (token == Char) basetype = CHAR;
+		if (token == Struct) basetype = STRUCT;
+
+		match(token);
 
 		// parse the comma seperated variable declaration.
 		while (token != ';') {
@@ -1131,11 +1151,26 @@ void struct_declaration(int *id) {
 				exit(-1);
 			}
 
+			if (basetype == STRUCT) {
+				struct_id = current_id;
+				struct_item = (int*)find_struct(current_id);
+				match(Id);
+			}
+
 			// struct member declaration
 			current_struct[S_MemId] = (int)current_id;
 			current_struct[S_MemType] = type;
 			current_struct[S_MemAddr] = struct_head[S_Size];
-			struct_head[S_Size] = struct_head[S_Size] + (type == CHAR ? sizeof(char) : sizeof(int));
+			current_struct[S_MemStructId] = 0;
+
+			if (basetype == STRUCT) {
+				current_struct[S_MemStructId] = (int)struct_id;
+				struct_head[S_Size] = struct_head[S_Size] + struct_item[S_Size];
+			}
+			else {
+				struct_head[S_Size] = struct_head[S_Size] + (type == CHAR ? sizeof(char) : sizeof(int));
+			}
+
 			struct_head[S_Count] = struct_head[S_Count] + 1;
 			current_struct = current_struct + S_MemSize;
 
@@ -1203,7 +1238,7 @@ void function_body() {
     // 2. statements
     // }
 
-    int pos_local, old_pos, type, *struct_item;; // position of local variables on the stack.
+    int pos_local, old_pos, type, *id, *struct_item;; // position of local variables on the stack.
 
 	struct_item = 0;
     pos_local = index_of_bp;
@@ -1230,6 +1265,7 @@ void function_body() {
             }
 
 			if (basetype == STRUCT) {
+				id = current_id;
 				struct_item = (int*)find_struct(current_id);
 				match(Id);
 			}
@@ -1246,10 +1282,10 @@ void function_body() {
             current_id[BType]  = current_id[Type];  current_id[Type]   = type;
             current_id[BValue] = current_id[Value]; current_id[Value]  = ++pos_local;   // index of current parameter
 			current_id[BSize] = current_id[Size]; current_id[Size] = 0;
-			current_id[BStructAddr] = current_id[StructAddr]; current_id[StructAddr] = 0;
+			current_id[BStructId] = current_id[StructId]; current_id[StructId] = 0;
 
 			if (basetype == STRUCT) {
-				current_id[StructAddr] = (int)struct_item;
+				current_id[StructId] = (int)id;
 				pos_local = old_pos + align_to_int(struct_item[S_Size]);
 				current_id[Value] = pos_local;
 			}
@@ -1332,7 +1368,7 @@ void function_declaration() {
 			current_id[Type]  = current_id[BType];
 			current_id[Value] = current_id[BValue];
 			current_id[Size] = current_id[BSize];
-			current_id[StructAddr] = current_id[BStructAddr];
+			current_id[StructId] = current_id[BStructId];
 		}
 		current_id = current_id + IdSize;
 	}
@@ -1342,6 +1378,7 @@ void global_declaration() {
     // int [*]id [; | (...) {...}]
     int type, *id, *struct_item; // tmp, actual type for variable
 
+	id = 0;
 	struct_item = 0;
     basetype = INT;
 
@@ -1381,6 +1418,11 @@ void global_declaration() {
 			match(';');
 			return;
 		}
+
+		if (struct_item == 0) {
+			printf("%d: undefined struct type\n", line);
+			exit(-1);
+		}
 	}
 
     // parse type information
@@ -1415,11 +1457,12 @@ void global_declaration() {
             printf("%d: duplicate global declaration\n", line);
             exit(-1);
         }
-		id = current_id;
-		match(Id); 
 
-        id[Type] = type;
-		id[StructAddr] = (int)struct_item;
+		current_id[Type] = type;
+		current_id[StructId] = (int)id;
+		id = current_id;
+
+		match(Id); 
 
         if (token == '(') {
             id[Class] = C_Fun;

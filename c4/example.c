@@ -12,21 +12,22 @@ struct Struct_test
 
 struct Struct_test2
 {
-	int *a;
 	char *b;
+	struct Struct_test a;
 };
 
 struct Struct_test *s_a;
 struct Struct_test s_a2[10];
+struct Struct_test2 s_c;
 
 void test()
 {
 	struct Struct_test s_a;
 	int i;
 	i = 0;
-	s_a.a = 53253252;
+	//s_a.a = 53253252;
 	//s_a.c = 643090;
-	printf("s_a.d: %d, s_a.a: %d\n", s_a.d, s_a.a);
+	//printf("s_a.d: %d, s_a.a: %d\n", s_a.d, s_a.a);
 	while (i <= 10) {
 		printf("fibonacci(%2d) = %d\n", i, fibonacci(i));
 		i = i + 1;
@@ -48,12 +49,13 @@ int main()
     i = 0;
 
 	s_a = &s_a2[0];
+	s_c.a.b = 234023;
 	(*s_a).a = 63242;
 	//s_a.d = 127;
 	//s_a.d = 532;
 	//s_a.a = 4523;
 	//s_a.c = 5;
-	//printf("s_a.d: %d, s_a.a: %d\n", s_a.b, s_a.a);
+	printf("s_a.d: %d, s_a.a: %d\n", s_c.a.b, s_c.b);
 
     while (i <= 10) {
         printf("fibonacci(%2d) = %d\n", i, fibonacci(i));
