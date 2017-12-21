@@ -50,7 +50,8 @@ int *current_id, // current parsed ID
 	*current_struct, // current parsed struct
 	*structs,	 // struct table
     line,        // line number of source code
-    token_val;   // value of current token (mainly for number)
+    token_val,   // value of current token (mainly for number)
+	pos_local;	 // position of local variables on the stack.
 
 int basetype;    // the type of a declaration, make it global for convenience
 int expr_type;   // the type of an expression
@@ -66,6 +67,8 @@ int *last_struct;// to keep value between recursive expression processing
 // 5: local var 1
 // 6: local var 2
 int index_of_bp; // index of bp pointer on stack
+
+void local_variable();
 
 void next() {
     char *last_pos;
@@ -1086,6 +1089,11 @@ void statement() {
         // empty statement
         match(';');
     }
+	else if (token == Int || token == Char || token == Struct) {
+		// define local variables
+		local_variable();
+		match(';');
+	}
     else {
         // a = b; or function_call();
         expression(Assign);
@@ -1250,102 +1258,103 @@ void function_parameter() {
     index_of_bp = params+1;
 }
 
+void local_variable() {
+	int old_pos, type, *id, *struct_item;
+
+	struct_item = 0;
+
+	// local variable declaration, just like global ones.
+	basetype = INT;
+	if (token == Char) basetype = CHAR;
+	if (token == Struct) basetype = STRUCT;
+
+	match(token);
+
+	while (token != ';') {
+		type = basetype;
+		while (token == Mul) {
+			match(Mul);
+			type = type + PTR;
+		}
+
+		if (token != Id) {
+			// invalid declaration
+			printf("%d: bad local declaration\n", line);
+			exit(-1);
+		}
+
+		if (basetype == STRUCT) {
+			id = current_id;
+			struct_item = (int*)find_struct(current_id);
+			match(Id);
+		}
+
+		if (current_id[Class] == C_Loc) {
+			// identifier exists
+			printf("%d: duplicate local declaration\n", line);
+			exit(-1);
+		}
+
+		old_pos = pos_local;
+		// store the local variable
+		current_id[BClass] = current_id[Class]; current_id[Class]  = C_Loc;
+		current_id[BType]  = current_id[Type];  current_id[Type]   = type;
+		current_id[BValue] = current_id[Value]; current_id[Value]  = ++pos_local;   // index of current parameter
+		current_id[BCount] = current_id[Count]; current_id[Count] = 0;
+		current_id[BStructId] = current_id[StructId]; current_id[StructId] = 0;
+
+		if (basetype == STRUCT) {
+			current_id[StructId] = (int)id;
+			pos_local = old_pos + align_to_int(struct_item[S_Size]);
+			current_id[Value] = pos_local;
+		}
+
+		match(Id);
+
+		if (token == Brak) {
+			// array declaration
+			match(Brak);
+			if (token == Num && token_val > 0) {
+				current_id[Count] = token_val;
+
+				// allocate memory & align to 4 byte
+				pos_local = old_pos + align_to_int(get_size(type, (int)struct_item) * (token_val));
+				current_id[Value] = pos_local;
+			}
+			else {
+				printf("%d: bad array declaration\n", line);
+				exit(-1);
+			}
+			match(Num);
+			match(']');
+		}
+
+		if (token == ',') {
+			match(',');
+		}
+	}
+}
+
 void function_body() {
     // type func_name (...) {...}
     //                   -->|   |<--
 
     // ... {
-    // 1. local declarations
     // 2. statements
     // }
-
-    int pos_local, old_pos, type, *id, *struct_item;; // position of local variables on the stack.
-
-	struct_item = 0;
+	int *variable_num;
     pos_local = index_of_bp;
-
-    while (token == Int || token == Char || token == Struct) {
-        // local variable declaration, just like global ones.
-        basetype = INT;
-		if (token == Char) basetype = CHAR;
-		if (token == Struct) basetype = STRUCT;
-
-        match(token);
-
-        while (token != ';') {
-            type = basetype;
-            while (token == Mul) {
-                match(Mul);
-                type = type + PTR;
-            }
-
-            if (token != Id) {
-                // invalid declaration
-                printf("%d: bad local declaration\n", line);
-                exit(-1);
-            }
-
-			if (basetype == STRUCT) {
-				id = current_id;
-				struct_item = (int*)find_struct(current_id);
-				match(Id);
-			}
-
-            if (current_id[Class] == C_Loc) {
-                // identifier exists
-                printf("%d: duplicate local declaration\n", line);
-                exit(-1);
-            }
-
-			old_pos = pos_local;
-            // store the local variable
-            current_id[BClass] = current_id[Class]; current_id[Class]  = C_Loc;
-            current_id[BType]  = current_id[Type];  current_id[Type]   = type;
-            current_id[BValue] = current_id[Value]; current_id[Value]  = ++pos_local;   // index of current parameter
-			current_id[BCount] = current_id[Count]; current_id[Count] = 0;
-			current_id[BStructId] = current_id[StructId]; current_id[StructId] = 0;
-
-			if (basetype == STRUCT) {
-				current_id[StructId] = (int)id;
-				pos_local = old_pos + align_to_int(struct_item[S_Size]);
-				current_id[Value] = pos_local;
-			}
-
-			match(Id);
-
-			if (token == Brak) {
-				// array declaration
-				match(Brak);
-				if (token == Num && token_val > 0) {
-					current_id[Count] = token_val;
-
-					// allocate memory & align to 4 byte
-					pos_local = old_pos + align_to_int(get_size(type, (int)struct_item) * (token_val));
-					current_id[Value] = pos_local;
-				}
-				else {
-					printf("%d: bad array declaration\n", line);
-					exit(-1);
-				}
-				match(Num);
-				match(']');
-			}
-
-            if (token == ',') {
-                match(',');
-            }
-        }
-        match(';');
-    }
 
     // save the stack size for local variables
     *++text = ENT;
-    *++text = pos_local - index_of_bp;
+	variable_num = ++text;
 
     // statements
     while (token != '}') {
         statement();
     }
+
+	 *variable_num = pos_local - index_of_bp;
 
     // emit code for leaving the sub function
     *++text = LEV;
