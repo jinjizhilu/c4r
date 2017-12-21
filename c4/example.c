@@ -6,8 +6,8 @@ int fibonacci(int i);
 
 struct Struct_test
 {
-	int a, b;
-	char c, *d;
+	int a, b[5];
+	char c[10], *d;
 };
 
 struct Struct_test2
@@ -49,13 +49,14 @@ int main()
     i = 0;
 
 	s_a = &s_a2[0];
-	s_c.a.b = 234023;
-	(*s_a).a = 63242;
+	s_c.a.b[0] = 234023;
+	s_a2[0].b[2] = 63242;
+	s_a2[1].c[1] = 6;
 	//s_a.d = 127;
 	//s_a.d = 532;
 	//s_a.a = 4523;
 	//s_a.c = 5;
-	printf("s_a.d: %d, s_a.a: %d\n", s_c.a.b, s_c.b);
+	printf("v1: %d, v2: %d, v3: %d\n", s_c.a.b[0], s_a2[0].b[2], s_a2[1].c[1]);
 
     while (i <= 10) {
         printf("fibonacci(%2d) = %d\n", i, fibonacci(i));

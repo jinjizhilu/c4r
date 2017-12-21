@@ -23,10 +23,10 @@ enum {
 };
 
 // fields of identifier
-enum {Token, Hash, Name, FuncAddr, StructId, Type, Class, Value, Size, BStructId, BType, BClass, BValue, BSize, IdSize};
+enum {Token, Hash, Name, FuncAddr, StructId, Type, Class, Value, Count, BStructId, BType, BClass, BValue, BCount, IdSize};
 
 enum {S_Id, S_Count, S_Size, S_HeadSize};
-enum {S_MemId, S_MemType, S_MemAddr, S_MemStructId, S_MemSize};
+enum {S_MemId, S_MemType, S_MemAddr, S_MemStructId, S_MemCount, S_MemSize};
 
 // types of variable/function
 enum { CHAR, INT, STRUCT, PTR };
@@ -538,7 +538,7 @@ void expression(int level) {
 
 				last_struct = (int*)find_struct((int*)id[StructId]);
 
-				if (id[Size] == 0)
+				if (id[Count] == 0)
 				{
 					// emit code, default behaviour is to load the value of the
 					// address which is stored in `ax`
@@ -971,7 +971,14 @@ void expression(int level) {
 				*++text = IMM;
 				*++text = struct_item[S_MemAddr];
 				*++text = ADD;
-				*++text = (expr_type == CHAR) ? LC : LI;
+
+				if (struct_item[S_MemCount] == 0)
+				{
+					*++text = (expr_type == CHAR) ? LC : LI;
+				}
+				else {
+					expr_type = expr_type + PTR;
+				}
 			}
             else {
                 printf("%d: compiler error, token = %d\n", line, token);
@@ -1110,7 +1117,7 @@ void enum_declaration() {
         current_id[Class] = C_Num;
         current_id[Type] = INT;
         current_id[Value] = i++;
-		current_id[Size] = 0;
+		current_id[Count] = 0;
 
         if (token == ',') {
             next();
@@ -1120,7 +1127,11 @@ void enum_declaration() {
 
 void struct_declaration(int *id) {
 	// parse struct id {int a, char b, int* c, ...}
-	int *struct_head, *struct_item, *struct_id, type;
+	int *struct_head, *struct_item, *struct_id, count, type;
+
+	count = 0;
+	struct_id = 0;
+	struct_item = 0;
 
 	struct_head = current_struct;
 	current_struct[S_Id] = (int)id;
@@ -1161,20 +1172,30 @@ void struct_declaration(int *id) {
 			current_struct[S_MemId] = (int)current_id;
 			current_struct[S_MemType] = type;
 			current_struct[S_MemAddr] = struct_head[S_Size];
-			current_struct[S_MemStructId] = 0;
-
-			if (basetype == STRUCT) {
-				current_struct[S_MemStructId] = (int)struct_id;
-				struct_head[S_Size] = struct_head[S_Size] + struct_item[S_Size];
-			}
-			else {
-				struct_head[S_Size] = struct_head[S_Size] + (type == CHAR ? sizeof(char) : sizeof(int));
-			}
-
-			struct_head[S_Count] = struct_head[S_Count] + 1;
-			current_struct = current_struct + S_MemSize;
+			current_struct[S_MemCount] = 0;
+			current_struct[S_MemStructId] = (int)struct_id;
+			count = 1;
 
 			match(Id);
+
+			if (token == Brak) {
+				// array declaration
+				match(Brak);
+				if (token == Num && token_val > 0) {
+					count = token_val;
+					current_struct[S_MemCount] = token_val;
+				}
+				else {
+					printf("%d: bad array declaration\n", line);
+					exit(-1);
+				}
+				match(Num);
+				match(']');
+			}
+
+			struct_head[S_Size] = struct_head[S_Size] + get_size(type, (int)struct_item) * count;
+			struct_head[S_Count] = struct_head[S_Count] + 1;
+			current_struct = current_struct + S_MemSize;
 
 			if (token == ',') {
 				match(',');
@@ -1281,7 +1302,7 @@ void function_body() {
             current_id[BClass] = current_id[Class]; current_id[Class]  = C_Loc;
             current_id[BType]  = current_id[Type];  current_id[Type]   = type;
             current_id[BValue] = current_id[Value]; current_id[Value]  = ++pos_local;   // index of current parameter
-			current_id[BSize] = current_id[Size]; current_id[Size] = 0;
+			current_id[BCount] = current_id[Count]; current_id[Count] = 0;
 			current_id[BStructId] = current_id[StructId]; current_id[StructId] = 0;
 
 			if (basetype == STRUCT) {
@@ -1296,7 +1317,7 @@ void function_body() {
 				// array declaration
 				match(Brak);
 				if (token == Num && token_val > 0) {
-					current_id[Size] = token_val;
+					current_id[Count] = token_val;
 
 					// allocate memory & align to 4 byte
 					pos_local = old_pos + align_to_int(get_size(type, (int)struct_item) * (token_val));
@@ -1367,7 +1388,7 @@ void function_declaration() {
 			current_id[Class] = current_id[BClass];
 			current_id[Type]  = current_id[BType];
 			current_id[Value] = current_id[BValue];
-			current_id[Size] = current_id[BSize];
+			current_id[Count] = current_id[BCount];
 			current_id[StructId] = current_id[BStructId];
 		}
 		current_id = current_id + IdSize;
@@ -1467,7 +1488,7 @@ void global_declaration() {
         if (token == '(') {
             id[Class] = C_Fun;
             id[Value] = (int)(text + 1); // the memory address of function
-			id[Size] = 0;
+			id[Count] = 0;
             function_declaration();
         } 
 		else if (token == Brak) {
@@ -1476,7 +1497,7 @@ void global_declaration() {
 			if (token == Num && token_val >	0) {
 				id[Class] = C_Glo; // global variable
 				id[Value] = (int)data; // assign memory address
-				id[Size] = token_val;
+				id[Count] = token_val;
 				
 				// allocate memory & align to 4 byte
 				data = data + get_size(type, (int)struct_item) * (token_val);
@@ -1493,7 +1514,7 @@ void global_declaration() {
             // variable declaration
             id[Class] = C_Glo; // global variable
             id[Value] = (int)data; // assign memory address
-			id[Size] = 0;
+			id[Count] = 0;
 			data = data + get_size(type, (int)struct_item);
 			data = (char*)(align_to_int((int)data) * sizeof(int));
         }
@@ -1663,7 +1684,7 @@ int main(int argc, char **argv)
         current_id[Class] = C_Sys;
         current_id[Type] = INT;
         current_id[Value] = i++;
-		current_id[Size] = 0;
+		current_id[Count] = 0;
     }
 
     next(); current_id[Token] = Char; // handle void type
