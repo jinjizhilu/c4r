@@ -11,7 +11,7 @@ int token; // current token
 // instructions
 enum { LEA ,IMM ,JMP ,CALL,JZ  ,JNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PUSH,
        OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,
-       OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,EXIT };
+       OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,MCPY,EXIT };
 
 // tokens and classes (operators last and in precedence order)
 // copied from c4
@@ -375,14 +375,21 @@ int align_to_int(int address) {
 	return address;
 }
 
-int assign_type_check(int left, int right) {
+int assign_type_check(int left, int right, int left_data, int right_data) {
+	// pointer assign
 	if (left >= PTR && right == INT) {
 		return 1;
 	}
-	if ((left >= PTR && right >= PTR) && left != right) {
+	// char & int
+	if (left <= INT && right <= INT) {
+		return 1;
+	}
+	// general assign
+	if (left != right) {
 		return 0;
 	}
-	if (left == STRUCT || right == STRUCT) {
+	// struct(pointer) assign
+	if (left % PTR == STRUCT && left_data != right_data) {
 		return 0;
 	}
 	return 1;
@@ -403,7 +410,7 @@ void expression(int level) {
     // 2. expr ::= unit_unary (bin_op unit_unary ...)
 
     // unit_unary()
-    int *id, tmp, *addr, *struct_item;
+    int *id, tmp, *addr, *struct_item, *struct_tmp;
 	id = 0;
 
     {
@@ -474,7 +481,6 @@ void expression(int level) {
             // 2. Enum variable
             // 3. global/local variable
 
-			last_struct = 0;
 			id = current_id;
             match(Id);
 
@@ -539,7 +545,9 @@ void expression(int level) {
                     exit(-1);
                 }
 
-				last_struct = (int*)find_struct((int*)id[StructId]);
+				if (id[Type] % PTR == STRUCT) {
+					last_struct = (int*)find_struct((int*)id[StructId]);
+				}
 
 				if (id[Count] == 0)
 				{
@@ -695,15 +703,29 @@ void expression(int level) {
                     printf("%d: bad lvalue in assignment\n", line);
                     exit(-1);
                 }
+
+				struct_tmp = last_struct;
+
                 expression(Assign);
 
-				if (assign_type_check(tmp, expr_type) == 0) {
+				if (assign_type_check(tmp, expr_type, (int)struct_tmp, (int)last_struct) == 0) {
 					printf("%d: unmatched type in assign\n", line);
 					exit(-1);
 				}
-
-                expr_type = tmp;
-                *++text = (expr_type == CHAR) ? SC : SI;
+				if (tmp == STRUCT && expr_type == STRUCT) {
+					if (struct_tmp == last_struct)
+					{
+						*text = PUSH;
+						*++text = IMM;
+						*++text = last_struct[S_Size];
+						*++text = PUSH;
+						*++text = MCPY;
+					}
+				}
+				else {
+					*++text = (tmp == CHAR) ? SC : SI;
+				}
+				expr_type = tmp;
             }
             else if (token == Cond) {
                 // expr ? a : b;
@@ -960,10 +982,7 @@ void expression(int level) {
 				match(Id);
 
 				expr_type = struct_item[S_MemType];
-
-				if (expr_type == STRUCT) {
-					last_struct = (int*)find_struct((int*)struct_item[S_MemStructId]);
-				}
+				last_struct = (int*)find_struct((int*)struct_item[S_MemStructId]);
 
 				if (*text == LC || *text == LI) {
 					*text = PUSH;
@@ -1001,6 +1020,8 @@ void statement() {
     // 6. expression; (expression end with semicolon)
 
     int *a, *b; // bess for branch control
+
+	last_struct = 0;
 
     if (token == If) {
         // if (...) <statement> [else <statement>]
@@ -1555,7 +1576,7 @@ int eval() {
             printf("%d> %.4s", cycle,
                    & "LEA ,IMM ,JMP ,CALL,JZ  ,JNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PUSH,"
                    "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,"
-                   "OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,EXIT"[op * 5]);
+                   "OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,MCPY,EXIT"[op * 5]);
             if (op <= ADJ)
                 printf(" %d\n", *pc);
             else
@@ -1603,6 +1624,7 @@ int eval() {
         else if (op == MALC) { ax = (int)malloc(*sp);}
         else if (op == MSET) { ax = (int)memset((char *)sp[2], sp[1], *sp);}
         else if (op == MCMP) { ax = memcmp((char *)sp[2], (char *)sp[1], *sp);}
+		else if (op == MCPY) { ax = (int)memcpy((char *)sp[2], (char *)sp[1], *sp);}
         else {
             printf("unknown instruction:%d\n", op);
             return -1;
@@ -1677,7 +1699,7 @@ int main(int argc, char **argv)
     old_text = text;
 
     src = "char else enum if int return sizeof struct while "
-          "open read close printf malloc memset memcmp exit void main";
+          "open read close printf malloc memset memcmp memcpy exit void main";
 
      // add keywords to symbol table
     i = Char;
