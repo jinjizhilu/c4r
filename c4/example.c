@@ -28,7 +28,7 @@ void test()
 	//printf("s_a.d: %d, s_a.a: %d\n", s_a.d, s_a.a);
 	while (i <= 10) {
 		printf("fibonacci(%2d) = %d\n", i, fibonacci(i));
-		i = i + 1;
+		i += 1;
 	}
 	printf("s_a.d: %d, s_a.a: %d\n", s_a.c[1], s_a.a);
 }
@@ -65,7 +65,7 @@ int main()
     while (i <= 10) {
         printf("fibonacci(%2d) = %d\n", i, fibonacci(i));
 		j[i] = i + i;
-		i = i + 1;
+		i += 1;
     }
 	test();
 

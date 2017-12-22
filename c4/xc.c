@@ -332,7 +332,7 @@ int find_struct(int *id) {
 		if (struct_item[S_Id] == (int)id) {
 			return (int)struct_item;
 		}
-		struct_item = struct_item + S_HeadSize + struct_item[S_Count] * S_MemSize;
+		struct_item += S_HeadSize + struct_item[S_Count] * S_MemSize;
 	}
 	return 0;
 }
@@ -395,6 +395,31 @@ int assign_type_check(int left, int right, int left_data, int right_data) {
 	return 1;
 }
 
+int op_assign_begin(int *new_level) {
+	if (token == Assign) {
+		match(Assign);
+
+		if (*text == LC || *text == LI) {
+			*(text + 1) = *text;
+			*text = PUSH;
+			++text;
+			*new_level = Assign;
+		}
+		else {
+			printf("%d: bad lvalue in assignment\n", line);
+			exit(-1);
+		}
+		return 1;
+	}
+	return 0;
+}
+
+void op_assign_end(int op_assign, int type) {
+	if (op_assign == 1) {
+		*++text = (type == CHAR) ? SC : SI;
+	}
+}
+
 void expression(int level) {
     // expressions have various format.
     // but majorly can be divided into two parts: unit and operator
@@ -410,7 +435,7 @@ void expression(int level) {
     // 2. expr ::= unit_unary (bin_op unit_unary ...)
 
     // unit_unary()
-    int *id, tmp, *addr, *struct_item, *struct_tmp;
+    int *id, tmp, *addr, *struct_item, *struct_tmp, op_assign, new_level;
 	id = 0;
 
     {
@@ -463,7 +488,7 @@ void expression(int level) {
 
             while (token == Mul) {
                 match(Mul);
-                expr_type = expr_type + PTR;
+                expr_type += PTR;
             }
 
             match(')');
@@ -568,7 +593,7 @@ void expression(int level) {
                 match(token);
                 while (token == Mul) {
                     match(Mul);
-                    tmp = tmp + PTR;
+                    tmp += PTR;
                 }
 
                 match(')');
@@ -588,7 +613,7 @@ void expression(int level) {
             expression(Inc); // dereference has the same precedence as Inc(++)
 
             if (expr_type >= PTR) {
-                expr_type = expr_type - PTR;
+                expr_type -= PTR;
             } else {
                 printf("%d: bad dereference\n", line);
                 exit(-1);
@@ -607,7 +632,7 @@ void expression(int level) {
                 exit(-1);
             }
 
-            expr_type = expr_type + PTR;
+            expr_type += PTR;
         }
         else if (token == '!') {
             // not
@@ -691,6 +716,7 @@ void expression(int level) {
     {
         while (token >= level) {
             // handle according to current operator's precedence
+			op_assign = 0;
             tmp = expr_type;
             if (token == Assign) {
                 // var = expr;
@@ -764,26 +790,44 @@ void expression(int level) {
             else if (token == Or) {
                 // bitwise or
                 match(Or);
+
+				new_level = Xor;
+				op_assign = op_assign_begin(&new_level);
+
                 *++text = PUSH;
-                expression(Xor);
+                expression(new_level);
                 *++text = OR;
                 expr_type = INT;
+
+				op_assign_end(op_assign, tmp);
             }
             else if (token == Xor) {
                 // bitwise xor
                 match(Xor);
+
+				new_level = And;
+				op_assign = op_assign_begin(&new_level);
+
                 *++text = PUSH;
-                expression(And);
+                expression(new_level);
                 *++text = XOR;
                 expr_type = INT;
+
+				op_assign_end(op_assign, tmp);
             }
             else if (token == And) {
                 // bitwise and
                 match(And);
+
+				new_level = Eq;
+				op_assign = op_assign_begin(&new_level);
+
                 *++text = PUSH;
-                expression(Eq);
+                expression(new_level);
                 *++text = AND;
                 expr_type = INT;
+
+				op_assign_end(op_assign, tmp);
             }
             else if (token == Eq) {
                 // equal ==
@@ -836,24 +880,40 @@ void expression(int level) {
             else if (token == Shl) {
                 // shift left
                 match(Shl);
+
+				new_level = Add;
+				op_assign = op_assign_begin(&new_level);
+
                 *++text = PUSH;
-                expression(Add);
+                expression(new_level);
                 *++text = SHL;
                 expr_type = INT;
+
+				op_assign_end(op_assign, tmp);
             }
             else if (token == Shr) {
                 // shift right
                 match(Shr);
+
+				new_level = Add;
+				op_assign = op_assign_begin(&new_level);
+
                 *++text = PUSH;
-                expression(Add);
+                expression(new_level);
                 *++text = SHR;
                 expr_type = INT;
+
+				op_assign_end(op_assign, tmp);
             }
             else if (token == Add) {
                 // add
                 match(Add);
+				
+				new_level = Mul;
+				op_assign = op_assign_begin(&new_level);
+
                 *++text = PUSH;
-                expression(Mul);
+                expression(new_level);
 
                 expr_type = tmp;
                 if (expr_type > PTR) {
@@ -864,12 +924,18 @@ void expression(int level) {
                     *++text = MUL;
                 }
                 *++text = ADD;
+
+				op_assign_end(op_assign, tmp);
             }
             else if (token == Sub) {
                 // sub
                 match(Sub);
+
+				new_level = Mul;
+				op_assign = op_assign_begin(&new_level);
+
                 *++text = PUSH;
-                expression(Mul);
+                expression(new_level);
                 if (tmp > PTR && tmp == expr_type) {
                     // pointer subtraction
                     *++text = SUB;
@@ -891,30 +957,49 @@ void expression(int level) {
                     *++text = SUB;
                     expr_type = tmp;
                 }
+				op_assign_end(op_assign, tmp);
             }
             else if (token == Mul) {
                 // multiply
                 match(Mul);
+
+				new_level = Inc;
+				op_assign = op_assign_begin(&new_level);
+
                 *++text = PUSH;
-                expression(Inc);
+                expression(new_level);
                 *++text = MUL;
                 expr_type = tmp;
+
+				op_assign_end(op_assign, tmp);
             }
             else if (token == Div) {
                 // divide
                 match(Div);
+
+				new_level = Inc;
+				op_assign = op_assign_begin(&new_level);
+
                 *++text = PUSH;
-                expression(Inc);
+                expression(new_level);
                 *++text = DIV;
                 expr_type = tmp;
+
+				op_assign_end(op_assign, tmp);
             }
             else if (token == Mod) {
                 // Modulo
                 match(Mod);
+
+				new_level = Inc;
+				op_assign = op_assign_begin(&new_level);
+
                 *++text = PUSH;
-                expression(Inc);
+                expression(new_level);
                 *++text = MOD;
                 expr_type = tmp;
+
+				op_assign_end(op_assign, tmp);
             }
             else if (token == Inc || token == Dec) {
                 // postfix inc(++) and dec(--)
@@ -1000,7 +1085,7 @@ void expression(int level) {
 					*++text = (expr_type == CHAR) ? LC : LI;
 				}
 				else {
-					expr_type = expr_type + PTR;
+					expr_type += PTR;
 				}
 			}
             else {
@@ -1223,9 +1308,9 @@ void struct_declaration(int *id) {
 				match(']');
 			}
 
-			struct_head[S_Size] = struct_head[S_Size] + get_size(type, (int)struct_item) * count;
-			struct_head[S_Count] = struct_head[S_Count] + 1;
-			current_struct = current_struct + S_MemSize;
+			struct_head[S_Size] += get_size(type, (int)struct_item) * count;
+			struct_head[S_Count]++;
+			current_struct += S_MemSize;
 
 			if (token == ',') {
 				match(',');
@@ -1422,7 +1507,7 @@ void function_declaration() {
 			current_id[Count] = current_id[BCount];
 			current_id[StructId] = current_id[BStructId];
 		}
-		current_id = current_id + IdSize;
+		current_id += IdSize;
 	}
 }
 
@@ -1495,7 +1580,7 @@ void global_declaration() {
         // parse pointer type, note that there may exist `int ****x;`
         while (token == Mul) {
             match(Mul);
-            type = type + PTR;
+            type += PTR;
         }
 
         if (token != Id) {
@@ -1531,7 +1616,7 @@ void global_declaration() {
 				id[Count] = token_val;
 				
 				// allocate memory & align to 4 byte
-				data = data + get_size(type, (int)struct_item) * (token_val);
+				data += get_size(type, (int)struct_item) * (token_val);
 				data = (char*)(align_to_int((int)data) * sizeof(int));
 			}
 			else {
@@ -1546,7 +1631,7 @@ void global_declaration() {
             id[Class] = C_Glo; // global variable
             id[Value] = (int)data; // assign memory address
 			id[Count] = 0;
-			data = data + get_size(type, (int)struct_item);
+			data += get_size(type, (int)struct_item);
 			data = (char*)(align_to_int((int)data) * sizeof(int));
         }
 
