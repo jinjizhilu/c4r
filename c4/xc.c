@@ -545,9 +545,7 @@ void expression(int level) {
                     exit(-1);
                 }
 
-				if (id[Type] % PTR == STRUCT) {
-					last_struct = (int*)find_struct((int*)id[StructId]);
-				}
+				last_struct = (int*)find_struct((int*)id[StructId]);
 
 				if (id[Count] == 0)
 				{
@@ -950,8 +948,11 @@ void expression(int level) {
                 // array access var[xx]
                 match(Brak);
                 *++text = PUSH;
+
+				struct_tmp = last_struct;
                 expression(Assign);
                 match(']');
+				last_struct = struct_tmp;
 					
 				if (tmp > PTR) {
 					// pointer, `not char *`
