@@ -1259,11 +1259,16 @@ void struct_declaration(int *id) {
 		basetype = INT;
 		if (token == Char) basetype = CHAR;
 		if (token == Struct) basetype = STRUCT;
-
 		match(token);
 
 		// parse the comma seperated variable declaration.
 		while (token != ';') {
+			if (basetype == STRUCT) {
+				struct_id = current_id;
+				struct_item = (int*)find_struct(current_id);
+				match(Id);
+			}
+
 			type = basetype;
 			// parse pointer type, note that there may exist `int ****x;`
 			while (token == Mul) {
@@ -1275,12 +1280,6 @@ void struct_declaration(int *id) {
 				// invalid declaration
 				printf("%d: bad struct member declaration\n", line);
 				exit(-1);
-			}
-
-			if (basetype == STRUCT) {
-				struct_id = current_id;
-				struct_item = (int*)find_struct(current_id);
-				match(Id);
 			}
 
 			// struct member declaration
@@ -1322,20 +1321,29 @@ void struct_declaration(int *id) {
 }
 
 void function_parameter() {
-    int type;
-    int params;
+    int type, params, *struct_item, *id;
     params = 0;
+
     while (token != ')') {
         // int name, ...
-        type = INT;
-        if (token == Int) {
-            match(Int);
-        } else if (token == Char) {
-            type = CHAR;
-            match(Char);
-        }
+		basetype = INT;
+		if (token == Char) basetype = CHAR;
+		if (token == Struct) basetype = STRUCT;
+		match(token);
+
+		if (basetype == STRUCT) {
+			id = current_id;
+			struct_item = (int*)find_struct(current_id);
+			match(Id);
+
+			if (token != Mul) {
+				printf("%d: bad parameter declaration\n", line);
+				exit(-1);
+			}
+		}
 
         // pointer type
+		type = basetype;
         while (token == Mul) {
             match(Mul);
             type = type + PTR;
@@ -1355,6 +1363,12 @@ void function_parameter() {
         current_id[BClass] = current_id[Class]; current_id[Class]  = C_Loc;
         current_id[BType]  = current_id[Type];  current_id[Type]   = type;
         current_id[BValue] = current_id[Value]; current_id[Value]  = params++;   // index of current parameter
+		current_id[BCount] = current_id[Count]; current_id[Count] = 0;
+		current_id[BStructId] = current_id[StructId]; current_id[StructId] = 0;
+
+		if (basetype == STRUCT && type >= PTR) {
+			current_id[StructId] = (int)id;
+		}
 
 		match(Id);
 
@@ -1362,7 +1376,7 @@ void function_parameter() {
             match(',');
         }
     }
-    index_of_bp = params+1;
+    index_of_bp = params + 1;
 }
 
 void local_variable() {
@@ -1378,6 +1392,13 @@ void local_variable() {
 	match(token);
 
 	while (token != ';') {
+		// struct TestStruct a, ...;
+		if (basetype == STRUCT) {
+			id = current_id;
+			struct_item = (int*)find_struct(current_id);
+			match(Id);
+		}
+
 		type = basetype;
 		while (token == Mul) {
 			match(Mul);
@@ -1388,12 +1409,6 @@ void local_variable() {
 			// invalid declaration
 			printf("%d: bad local declaration\n", line);
 			exit(-1);
-		}
-
-		if (basetype == STRUCT) {
-			id = current_id;
-			struct_item = (int*)find_struct(current_id);
-			match(Id);
 		}
 
 		if (current_id[Class] == C_Loc) {
@@ -1412,7 +1427,7 @@ void local_variable() {
 
 		if (basetype == STRUCT) {
 			current_id[StructId] = (int)id;
-			pos_local = old_pos + align_to_int(struct_item[S_Size]);
+			pos_local = old_pos + align_to_int(get_size(type, (int)struct_item));
 			current_id[Value] = pos_local;
 		}
 

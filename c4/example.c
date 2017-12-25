@@ -18,7 +18,7 @@ struct Struct_test2
 
 int j;
 
-void test()
+void test(struct Struct_test* s_b)
 {
 	struct Struct_test s_a;
 	int i;
@@ -30,7 +30,7 @@ void test()
 		printf("fibonacci(%2d) = %d\n", i, fibonacci(i));
 		i += 1;
 	}
-	printf("s_a.d: %d, s_a.a: %d\n", s_a.c[1], s_a.a);
+	printf("s_a.d: %d, s_a.a: %d\n", (*s_b).c[1], (*s_b).a);
 }
 
 int fibonacci(int i) {
@@ -67,7 +67,8 @@ int main()
 		j[i] = i + i;
 		i += 1;
     }
-	test();
+	test(&s_a2[5]);
+	printf("v: %d\n", s_a2[5].a);
 
 	int *p;
 	p = j;
