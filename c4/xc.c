@@ -325,8 +325,7 @@ void match(int tk) {
 }
 
 int find_struct(int *id) {
-	int *struct_item;
-	struct_item = structs;
+	int *struct_item = structs;
 
 	while (struct_item[S_Id] != 0) {
 		if (struct_item[S_Id] == (int)id) {
@@ -338,8 +337,7 @@ int find_struct(int *id) {
 }
 
 int find_struct_member(int *struct_item, int *id) {
-	int *struct_end;
-	struct_end = struct_item + S_HeadSize + struct_item[S_Count] * S_MemSize;
+	int *struct_end = struct_item + S_HeadSize + struct_item[S_Count] * S_MemSize;
 	struct_item = struct_item + S_HeadSize;
 
 	while (struct_item < struct_end) {
@@ -435,8 +433,7 @@ void expression(int level) {
     // 2. expr ::= unit_unary (bin_op unit_unary ...)
 
     // unit_unary()
-    int *id, tmp, *addr, *struct_item, *struct_tmp, op_assign, new_level;
-	id = 0;
+    int *id = 0, tmp, *addr, *struct_item, *struct_tmp, op_assign, new_level;
 
     {
         if (!token) {
@@ -706,6 +703,9 @@ void expression(int level) {
             *++text = (tmp == Inc) ? ADD : SUB;
             *++text = (expr_type == CHAR) ? SC : SI;
         }
+		else if (token == Assign) {
+			// variable assign in define mode
+		}
         else {
             printf("%d: bad expression\n", line);
             exit(-1);
@@ -1210,8 +1210,8 @@ void statement() {
 
 void enum_declaration() {
     // parse enum [id] { a = 1, b = 3, ...}
-    int i;
-    i = 0;
+    int i = 0;
+
     while (token != '}') {
         if (token != Id) {
             printf("%d: bad enum identifier %d\n", line, token);
@@ -1242,11 +1242,7 @@ void enum_declaration() {
 
 void struct_declaration(int *id) {
 	// parse struct id {int a, char b, int* c, ...}
-	int *struct_head, *struct_item, *struct_id, count, type;
-
-	count = 0;
-	struct_id = 0;
-	struct_item = 0;
+	int *struct_head, *struct_item = 0, *struct_id = 0, count = 0, type;
 
 	struct_head = current_struct;
 	current_struct[S_Id] = (int)id;
@@ -1321,8 +1317,7 @@ void struct_declaration(int *id) {
 }
 
 void function_parameter() {
-    int type, params, *struct_item, *id;
-    params = 0;
+    int type, params = 0, *struct_item, *id;
 
     while (token != ')') {
         // int name, ...
@@ -1380,9 +1375,7 @@ void function_parameter() {
 }
 
 void local_variable() {
-	int old_pos, type, *id, *struct_item;
-
-	struct_item = 0;
+	int old_pos, type, *id, *struct_item = 0;
 
 	// local variable declaration, just like global ones.
 	basetype = INT;
@@ -1451,6 +1444,15 @@ void local_variable() {
 			match(']');
 		}
 
+		if (token == Assign) {
+			*++text = LEA;
+			*++text = index_of_bp - current_id[Value];
+			*++text = LC; // this instruction will be overwritten
+			expr_type = type;
+
+			expression(Assign);
+		}
+
 		if (token == ',') {
 			match(',');
 		}
@@ -1484,8 +1486,7 @@ void function_body() {
 
 void function_declaration() {
     // type func_name (...)
-	int *id;
-	id = current_id;
+	int *id = current_id;
 
     match('(');
     function_parameter();
@@ -1528,10 +1529,8 @@ void function_declaration() {
 
 void global_declaration() {
     // int [*]id [; | (...) {...}]
-    int type, *id, *struct_item; // tmp, actual type for variable
+    int type, *id = 0, *struct_item = 0; // tmp, actual type for variable
 
-	id = 0;
-	struct_item = 0;
     basetype = INT;
 
     // parse enum, this should be treated alone.

@@ -21,8 +21,7 @@ int j;
 void test(struct Struct_test* s_b)
 {
 	struct Struct_test s_a;
-	int i;
-	i = 0;
+	int i = 0;
 	s_a.a = 53253252;
 	s_a.c[1] = 643090;
 	//printf("s_a.d: %d, s_a.a: %d\n", s_a.d, s_a.a);
