@@ -19,7 +19,7 @@ enum {
   C_Num = 128, C_Fun, C_Sys, C_Glo, C_Loc,
   Id, Num, 
   Char, Else, Enum, If, Int, Return, Sizeof, Struct, While,
-  Assign, Cond, Lor, Lan, Or, Xor, And, Eq, Ne, Lt, Gt, Le, Ge, Shl, Shr, Add, Sub, Mul, Div, Mod, Inc, Dec, Brak, Point
+  Assign, Cond, Lor, Lan, Or, Xor, And, Eq, Ne, Lt, Gt, Le, Ge, Shl, Shr, Add, Sub, Mul, Div, Mod, Inc, Dec, Brak, Point, Member
 };
 
 // fields of identifier
@@ -225,6 +225,9 @@ void next() {
             if (*src == '-') {
                 src ++;
                 token = Dec;
+			} else if (*src == '>') {
+				src ++;
+				token = Member;
             } else {
                 token = Sub;
             }
@@ -1054,15 +1057,19 @@ void expression(int level) {
 				*++text = ADD;
 				*++text = (expr_type == CHAR) ? LC : LI;
             }
-			else if (token == Point) {
+			else if (token == Point || token == Member) {
 				// struct member access var1.var2
+				if (token == Member) {
+					tmp -= PTR;
+					*++text = LI; // this instruction will be overwritten
+				}
 
 				if (tmp != STRUCT || last_struct == 0) {
 					printf("%d: struct type expected\n", line);
 					exit(-1);
 				}
 				struct_item = (int*)last_struct;
-				match(Point);
+				match(token);
 
 				struct_item = (int*)find_struct_member(struct_item, current_id);
 				match(Id);
@@ -1070,7 +1077,7 @@ void expression(int level) {
 				expr_type = struct_item[S_MemType];
 				last_struct = (int*)find_struct((int*)struct_item[S_MemStructId]);
 
-				if (*text == LC || *text == LI) {
+				if (*text == LI) {
 					*text = PUSH;
 				} else {
 					printf("%d: bad lvalue in assignment\n", line);
@@ -1447,7 +1454,7 @@ void local_variable() {
 		if (token == Assign) {
 			*++text = LEA;
 			*++text = index_of_bp - current_id[Value];
-			*++text = LC; // this instruction will be overwritten
+			*++text = LI; // this instruction will be overwritten
 			expr_type = type;
 
 			expression(Assign);
