@@ -1041,19 +1041,20 @@ void expression(int level) {
                 expression(Assign);
                 match(']');
 				last_struct = struct_tmp;
+				expr_type = tmp - PTR;
 					
-				if (tmp > PTR) {
+				if (expr_type > CHAR) {
 					// pointer, `not char *`
 					*++text = PUSH;
 					*++text = IMM;
-					*++text = sizeof(int);
+					*++text = get_size(expr_type, (int)last_struct);
 					*++text = MUL;
 				}
-				else if (tmp < PTR) {
+				else if (expr_type < CHAR) {
 					printf("%d: pointer or array type expected\n", line);
 					exit(-1);
 				}
-				expr_type = tmp - PTR;
+
 				*++text = ADD;
 				*++text = (expr_type == CHAR) ? LC : LI;
             }
