@@ -11,7 +11,7 @@ int token; // current token
 // instructions
 enum { LEA ,IMM ,JMP ,CALL,JZ  ,JNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PUSH,
        OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,
-       OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,MCPY,EXIT };
+       OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,MCPY,FREE,EXIT };
 
 // tokens and classes (operators last and in precedence order)
 // copied from c4
@@ -28,19 +28,16 @@ struct SymbolProperty {
 	int category;
 	int value;
 	int count;
+	struct SymbolProperty *next;
 };
 
 struct Symbol {
 	int token;
 	int hash;
-	char* name;
-	int* funcAddr;
-	struct SymbolProperty item;
-	struct SymbolProperty baseItem;
+	char *name;
+	int *funcAddr;
+	struct SymbolProperty *item;
 };
-
-// fields of identifier
-enum {Token, Hash, Name, FuncAddr, StructId, Type, Class, Value, Count, BStructId, BType, BClass, BValue, BCount, IdSize};
 
 enum {S_Id, S_Count, S_Size, S_HeadSize};
 enum {S_MemId, S_MemType, S_MemAddr, S_MemStructId, S_MemCount, S_MemSize};
@@ -110,7 +107,7 @@ void next() {
                 while (old_text < text) {
                     printf("%8.4s", & "LEA ,IMM ,JMP ,CALL,JZ  ,JNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PUSH,"
                                       "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,"
-                                      "OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,EXIT"[*++old_text * 5]);
+                                      "OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,FREE,EXIT"[*++old_text * 5]);
 
                     if (*old_text <= ADJ)
                         printf(" %d\n", *++old_text);
@@ -157,6 +154,9 @@ void next() {
             // store new ID
             symbols_new[cid].name = last_pos;
             symbols_new[cid].hash = hash;
+			symbols_new[cid].item = malloc(sizeof(struct SymbolProperty));
+			memset(symbols_new[cid].item, 0, sizeof(struct SymbolProperty));
+
             token = symbols_new[cid].token = Id;
             return;
         }
@@ -450,6 +450,22 @@ void op_assign_end(int op_assign, int type) {
 	}
 }
 
+void push_symbol_property(struct Symbol *cur) {
+	struct SymbolProperty *new_item;
+	new_item = malloc(sizeof(struct SymbolProperty));
+	memset(new_item, 0, sizeof(struct SymbolProperty));
+
+	new_item->next = cur->item;
+	cur->item = new_item;
+}
+
+void pop_symbol_property(struct Symbol *cur) {
+	struct SymbolProperty *old_item;
+	old_item = cur->item;
+	cur->item = cur->item->next;
+	free(old_item);
+}
+
 void expression(int level) {
     // expressions have various format.
     // but majorly can be divided into two parts: unit and operator
@@ -506,14 +522,16 @@ void expression(int level) {
             // supported.
             match(Sizeof);
             match('(');
-            expr_type = INT;
 
-            if (token == Int) {
-                match(Int);
-            } else if (token == Char) {
-                match(Char);
-                expr_type = CHAR;
-            }
+            expr_type = INT;
+			if (token == Char) expr_type = CHAR;
+			if (token == Struct) expr_type = STRUCT;
+			match(token);
+
+			if (expr_type == STRUCT) {
+				struct_item = (int*)find_struct(cid);
+				match(Id);
+			}
 
             while (token == Mul) {
                 match(Mul);
@@ -524,7 +542,12 @@ void expression(int level) {
 
             // emit code
             *++text = IMM;
-            *++text = (expr_type == CHAR) ? sizeof(char) : sizeof(int);
+			if (expr_type != STRUCT) {
+				*++text = get_size(expr_type, 0);
+			}
+			else {
+				*++text = get_size(expr_type, (int)struct_item);
+			}
 
             expr_type = INT;
         }
@@ -557,14 +580,14 @@ void expression(int level) {
                 match(')');
 
                 // emit code
-                if (symbols_new[id].item.category == C_Sys) {
+                if (symbols_new[id].item->category == C_Sys) {
                     // system functions
-                    *++text = symbols_new[id].item.value;
+                    *++text = symbols_new[id].item->value;
                 }
-                else if (symbols_new[id].item.category == C_Fun) {
+                else if (symbols_new[id].item->category == C_Fun) {
                     // function call
                     *++text = CALL;
-					*++text = symbols_new[id].item.value;
+					*++text = symbols_new[id].item->value;
                 }
                 else {
                     printf("%d: bad function call\n", line);
@@ -576,41 +599,41 @@ void expression(int level) {
                     *++text = ADJ;
                     *++text = tmp;
                 }
-                expr_type = symbols_new[id].item.type;
+                expr_type = symbols_new[id].item->type;
             }
-            else if (symbols_new[id].item.category == C_Num) {
+            else if (symbols_new[id].item->category == C_Num) {
                 // enum variable
                 *++text = IMM;
-                *++text = symbols_new[id].item.value;
+                *++text = symbols_new[id].item->value;
                 expr_type = INT;
             }
             else {
                 // variable
-                if (symbols_new[id].item.category == C_Loc) {
+                if (symbols_new[id].item->category == C_Loc) {
                     *++text = LEA;
-                    *++text = index_of_bp - symbols_new[id].item.value;
+                    *++text = index_of_bp - symbols_new[id].item->value;
                 }
-                else if (symbols_new[id].item.category == C_Glo) {
+                else if (symbols_new[id].item->category == C_Glo) {
                     *++text = IMM;
-                    *++text = symbols_new[id].item.value;
+                    *++text = symbols_new[id].item->value;
                 }
                 else {
                     printf("%d: undefined variable\n", line);
                     exit(-1);
                 }
 
-				last_struct = (int*)find_struct(symbols_new[id].item.structId);
+				last_struct = (int*)find_struct(symbols_new[id].item->structId);
 
-				if (symbols_new[id].item.count == 0)
+				if (symbols_new[id].item->count == 0)
 				{
 					// emit code, default behaviour is to load the value of the
 					// address which is stored in `ax`
-					expr_type = symbols_new[id].item.type;
+					expr_type = symbols_new[id].item->type;
 					*++text = (expr_type == Char) ? LC : LI;
 				}
 				else {
 					// for array type, value is address, do not need LC/LI
-					expr_type = symbols_new[id].item.type + PTR;
+					expr_type = symbols_new[id].item->type + PTR;
 				}
             }
         }
@@ -1266,10 +1289,10 @@ void enum_declaration() {
             next();
         }
 
-        symbols_new[cid].item.category = C_Num;
-        symbols_new[cid].item.type = INT;
-        symbols_new[cid].item.value = i++;
-		symbols_new[cid].item.count = 0;
+        symbols_new[cid].item->category = C_Num;
+        symbols_new[cid].item->type = INT;
+        symbols_new[cid].item->value = i++;
+		symbols_new[cid].item->count = 0;
 
         if (token == ',') {
             next();
@@ -1294,14 +1317,14 @@ void struct_declaration(int id) {
 		if (token == Struct) basetype = STRUCT;
 		match(token);
 
+		if (basetype == STRUCT) {
+			struct_id = cid;
+			struct_item = (int*)find_struct(cid);
+			match(Id);
+		}
+
 		// parse the comma seperated variable declaration.
 		while (token != ';') {
-			if (basetype == STRUCT) {
-				struct_id = cid;
-				struct_item = (int*)find_struct(cid);
-				match(Id);
-			}
-
 			type = basetype;
 			// parse pointer type, note that there may exist `int ****x;`
 			while (token == Mul) {
@@ -1313,6 +1336,13 @@ void struct_declaration(int id) {
 				// invalid declaration
 				printf("%d: bad struct member declaration\n", line);
 				exit(-1);
+			}
+
+			if (type % PTR == STRUCT) {
+				if (struct_item == 0 || (struct_id == id && type == STRUCT)) {
+					printf("%d: unrecognized struct type\n", line);
+					exit(-1);
+				}
 			}
 
 			// struct member declaration
@@ -1386,20 +1416,21 @@ void function_parameter() {
             printf("%d: bad parameter declaration\n", line);
             exit(-1);
         }
-        if (symbols_new[cid].item.category == C_Loc) {
+        if (symbols_new[cid].item->category == C_Loc) {
             printf("%d: duplicate parameter declaration\n", line);
             exit(-1);
         }
 
         // store the local variable
-        symbols_new[cid].baseItem.category = symbols_new[cid].item.category; symbols_new[cid].item.category  = C_Loc;
-        symbols_new[cid].baseItem.type  = symbols_new[cid].item.type;  symbols_new[cid].item.type   = type;
-        symbols_new[cid].baseItem.value = symbols_new[cid].item.value; symbols_new[cid].item.value  = params++;   // index of current parameter
-		symbols_new[cid].baseItem.count = symbols_new[cid].item.count; symbols_new[cid].item.count = 0;
-		symbols_new[cid].baseItem.structId = symbols_new[cid].item.structId; symbols_new[cid].item.structId = 0;
+		push_symbol_property(&symbols_new[cid]);
+        symbols_new[cid].item->category  = C_Loc;
+        symbols_new[cid].item->type   = type;
+        symbols_new[cid].item->value  = params++;   // index of current parameter
+		symbols_new[cid].item->count = 0;
+		symbols_new[cid].item->structId = 0;
 
 		if (basetype == STRUCT && type >= PTR) {
-			symbols_new[cid].item.structId = (int)id;
+			symbols_new[cid].item->structId = (int)id;
 		}
 
 		match(Id);
@@ -1441,7 +1472,7 @@ void local_variable() {
 			exit(-1);
 		}
 
-		if (symbols_new[cid].item.category == C_Loc) {
+		if (symbols_new[cid].item->category == C_Loc) {
 			// identifier exists
 			printf("%d: duplicate local declaration\n", line);
 			exit(-1);
@@ -1449,16 +1480,17 @@ void local_variable() {
 
 		old_pos = pos_local;
 		// store the local variable
-		symbols_new[cid].baseItem.category = symbols_new[cid].item.category; symbols_new[cid].item.category  = C_Loc;
-		symbols_new[cid].baseItem.type  = symbols_new[cid].item.type;  symbols_new[cid].item.type   = type;
-		symbols_new[cid].baseItem.value = symbols_new[cid].item.value; symbols_new[cid].item.value  = ++pos_local;   // index of current parameter
-		symbols_new[cid].baseItem.count = symbols_new[cid].item.count; symbols_new[cid].item.count = 0;
-		symbols_new[cid].baseItem.structId = symbols_new[cid].item.structId; symbols_new[cid].item.structId = 0;
+		push_symbol_property(&symbols_new[cid]);
+		symbols_new[cid].item->category  = C_Loc;
+		symbols_new[cid].item->type   = type;
+		symbols_new[cid].item->value  = ++pos_local;   // index of current parameter
+		symbols_new[cid].item->count = 0;
+		symbols_new[cid].item->structId = 0;
 
 		if (basetype == STRUCT) {
-			symbols_new[cid].item.structId = (int)id;
+			symbols_new[cid].item->structId = (int)id;
 			pos_local = old_pos + align_to_int(get_size(type, (int)struct_item));
-			symbols_new[cid].item.value = pos_local;
+			symbols_new[cid].item->value = pos_local;
 		}
 
 		match(Id);
@@ -1467,11 +1499,11 @@ void local_variable() {
 			// array declaration
 			match(Brak);
 			if (token == Num && token_val > 0) {
-				symbols_new[cid].item.count = token_val;
+				symbols_new[cid].item->count = token_val;
 
 				// allocate memory & align to 4 byte
 				pos_local = old_pos + align_to_int(get_size(type, (int)struct_item) * (token_val));
-				symbols_new[cid].item.value = pos_local;
+				symbols_new[cid].item->value = pos_local;
 			}
 			else {
 				printf("%d: bad array declaration\n", line);
@@ -1483,7 +1515,7 @@ void local_variable() {
 
 		if (token == Assign) {
 			*++text = LEA;
-			*++text = index_of_bp - symbols_new[cid].item.value;
+			*++text = index_of_bp - symbols_new[cid].item->value;
 			*++text = LI; // this instruction will be overwritten
 			expr_type = type;
 
@@ -1535,7 +1567,6 @@ void function_declaration() {
 		*++text = 0;
 		// store jmp target address
 		symbols_new[id].funcAddr = text;
-		printf("%.15s: %d - %d\n", symbols_new[id].name, (int)text, line);
 		//match(';');
 	}
 	else {
@@ -1555,12 +1586,8 @@ void function_declaration() {
 	// unwind local variable declarations for all local variables.
 	cid = 0;
 	while (symbols_new[cid].token) {
-		if (symbols_new[cid].item.category == C_Loc) {
-			symbols_new[cid].item.category = symbols_new[cid].baseItem.category;
-			symbols_new[cid].item.type  = symbols_new[cid].baseItem.type;
-			symbols_new[cid].item.value = symbols_new[cid].baseItem.value;
-			symbols_new[cid].item.count = symbols_new[cid].baseItem.count;
-			symbols_new[cid].item.structId = symbols_new[cid].baseItem.structId;
+		if (symbols_new[cid].item->category == C_Loc) {
+			pop_symbol_property(&symbols_new[cid]);
 		}
 		++cid;
 	}
@@ -1642,31 +1669,31 @@ void global_declaration() {
             exit(-1);
         }
 		// symbols_new[cid].funcAddr != 0 means function declaration has been processed
-        if (symbols_new[cid].item.category && symbols_new[cid].funcAddr == 0) {
+        if (symbols_new[cid].item->category && symbols_new[cid].funcAddr == 0) {
             // identifier exists
             printf("%d: duplicate global declaration\n", line);
             exit(-1);
         }
 
-		symbols_new[cid].item.type = type;
-		symbols_new[cid].item.structId = (int)id;
+		symbols_new[cid].item->type = type;
+		symbols_new[cid].item->structId = (int)id;
 		id = cid;
 
 		match(Id); 
 
         if (token == '(') {
-            symbols_new[id].item.category = C_Fun;
-            symbols_new[id].item.value = (int)(text + 1); // the memory address of function
-			symbols_new[id].item.count = 0;
+            symbols_new[id].item->category = C_Fun;
+            symbols_new[id].item->value = (int)(text + 1); // the memory address of function
+			symbols_new[id].item->count = 0;
             function_declaration();
         } 
 		else if (token == Brak) {
 			// array declaration
 			match(Brak);
 			if (token == Num && token_val >	0) {
-				symbols_new[id].item.category = C_Glo; // global variable
-				symbols_new[id].item.value = (int)data; // assign memory address
-				symbols_new[id].item.count = token_val;
+				symbols_new[id].item->category = C_Glo; // global variable
+				symbols_new[id].item->value = (int)data; // assign memory address
+				symbols_new[id].item->count = token_val;
 				
 				// allocate memory & align to 4 byte
 				data += get_size(type, (int)struct_item) * (token_val);
@@ -1681,9 +1708,9 @@ void global_declaration() {
 		}
 		else if (token == ',' || token == ';') {
             // variable declaration
-            symbols_new[id].item.category = C_Glo; // global variable
-            symbols_new[id].item.value = (int)data; // assign memory address
-			symbols_new[id].item.count = 0;
+            symbols_new[id].item->category = C_Glo; // global variable
+            symbols_new[id].item->value = (int)data; // assign memory address
+			symbols_new[id].item->count = 0;
 			data += get_size(type, (int)struct_item);
 			data = (char*)(align_to_int((int)data) * sizeof(int));
         }
@@ -1768,8 +1795,10 @@ int eval() {
         else if (op == MSET) { ax = (int)memset((char *)sp[2], sp[1], *sp);}
         else if (op == MCMP) { ax = memcmp((char *)sp[2], (char *)sp[1], *sp);}
 		else if (op == MCPY) { ax = (int)memcpy((char *)sp[2], (char *)sp[1], *sp);}
+		else if (op == FREE) { free((void*)*sp);}
         else {
             printf("unknown instruction:%d\n", op);
+			printf("line: %d\n", debug_line[pc - text_head]);
             return -1;
         }
     }
@@ -1836,22 +1865,16 @@ int main(int argc, char **argv)
     memset(stack, 0, poolsize);
     memset(structs, 0, poolsize);
 	memset(debug_line, 0, poolsize);
+	memset(symbols_new, 0, sizeof(struct Symbol) * 256);
 	text_head = text;
 	last_text = 0;
-
-	i = 0;
-	while (i < 256) {
-		symbols_new[i].token = 0;
-		symbols_new[i].funcAddr = 0;
-		++i;
-	}
 
 	current_struct = structs;
 
     old_text = text;
 
     src = "char else enum if int return sizeof struct while "
-          "open read close printf malloc memset memcmp memcpy exit void main";
+          "open read close printf malloc memset memcmp memcpy free exit void main";
 
      // add keywords to symbol table
     i = Char;
@@ -1864,10 +1887,10 @@ int main(int argc, char **argv)
     i = OPEN;
     while (i <= EXIT) {
         next();
-        symbols_new[cid].item.category = C_Sys;
-        symbols_new[cid].item.type = INT;
-        symbols_new[cid].item.value = i++;
-		symbols_new[cid].item.count = 0;
+        symbols_new[cid].item->category = C_Sys;
+        symbols_new[cid].item->type = INT;
+        symbols_new[cid].item->value = i++;
+		symbols_new[cid].item->count = 0;
     }
 
     next(); symbols_new[cid].token = Char; // handle void type
@@ -1887,7 +1910,7 @@ int main(int argc, char **argv)
 
     program();
 
-    if (!(pc = (int *)symbols_new[idmain].item.value)) {
+    if (!(pc = (int *)symbols_new[idmain].item->value)) {
         printf("main() not defined\n");
         return -1;
     }

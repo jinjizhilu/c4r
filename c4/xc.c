@@ -11,7 +11,7 @@ int token; // current token
 // instructions
 enum { LEA ,IMM ,JMP ,CALL,JZ  ,JNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PUSH,
        OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,
-       OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,MCPY,EXIT };
+       OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,MCPY,FREE,EXIT };
 
 // tokens and classes (operators last and in precedence order)
 // copied from c4
@@ -86,7 +86,7 @@ void next() {
                 while (old_text < text) {
                     printf("%8.4s", & "LEA ,IMM ,JMP ,CALL,JZ  ,JNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PUSH,"
                                       "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,"
-                                      "OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,EXIT"[*++old_text * 5]);
+                                      "OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,FREE,EXIT"[*++old_text * 5]);
 
                     if (*old_text <= ADJ)
                         printf(" %d\n", *++old_text);
@@ -471,34 +471,41 @@ void expression(int level) {
             data = (char *)(align_to_int((int)data + sizeof(char)) * sizeof(int));
             expr_type = PTR;
         }
-        else if (token == Sizeof) {
-            // sizeof is actually an unary operator
-            // now only `sizeof(int)`, `sizeof(char)` and `sizeof(*...)` are
-            // supported.
-            match(Sizeof);
-            match('(');
-            expr_type = INT;
+		else if (token == Sizeof) {
+			// sizeof is actually an unary operator
+			// now only `sizeof(int)`, `sizeof(char)` and `sizeof(*...)` are
+			// supported.
+			match(Sizeof);
+			match('(');
 
-            if (token == Int) {
-                match(Int);
-            } else if (token == Char) {
-                match(Char);
-                expr_type = CHAR;
-            }
+			expr_type = INT;
+			if (token == Char) expr_type = CHAR;
+			if (token == Struct) expr_type = STRUCT;
+			match(token);
 
-            while (token == Mul) {
-                match(Mul);
-                expr_type += PTR;
-            }
+			if (expr_type == STRUCT) {
+				struct_item = (int*)find_struct(current_id);
+				match(Id);
+			}
 
-            match(')');
+			while (token == Mul) {
+				match(Mul);
+				expr_type += PTR;
+			}
 
-            // emit code
-            *++text = IMM;
-            *++text = (expr_type == CHAR) ? sizeof(char) : sizeof(int);
+			match(')');
 
-            expr_type = INT;
-        }
+			// emit code
+			*++text = IMM;
+			if (expr_type != STRUCT) {
+				*++text = get_size(expr_type, 0);
+			}
+			else {
+				*++text = get_size(expr_type, (int)struct_item);
+			}
+
+			expr_type = INT;
+		}
         else if (token == Id) {
             // there are several type when occurs to Id
             // but this is unit, so it can only be
@@ -1265,14 +1272,14 @@ void struct_declaration(int *id) {
 		if (token == Struct) basetype = STRUCT;
 		match(token);
 
+		if (basetype == STRUCT) {
+			struct_id = current_id;
+			struct_item = (int*)find_struct(current_id);
+			match(Id);
+		}
+
 		// parse the comma seperated variable declaration.
 		while (token != ';') {
-			if (basetype == STRUCT) {
-				struct_id = current_id;
-				struct_item = (int*)find_struct(current_id);
-				match(Id);
-			}
-
 			type = basetype;
 			// parse pointer type, note that there may exist `int ****x;`
 			while (token == Mul) {
@@ -1389,17 +1396,16 @@ void local_variable() {
 	basetype = INT;
 	if (token == Char) basetype = CHAR;
 	if (token == Struct) basetype = STRUCT;
-
 	match(token);
 
-	while (token != ';') {
-		// struct TestStruct a, ...;
-		if (basetype == STRUCT) {
-			id = current_id;
-			struct_item = (int*)find_struct(current_id);
-			match(Id);
-		}
+	// struct TestStruct a, ...;
+	if (basetype == STRUCT) {
+		id = current_id;
+		struct_item = (int*)find_struct(current_id);
+		match(Id);
+	}
 
+	while (token != ';') {
 		type = basetype;
 		while (token == Mul) {
 			match(Mul);
@@ -1733,6 +1739,7 @@ int eval() {
         else if (op == MSET) { ax = (int)memset((char *)sp[2], sp[1], *sp);}
         else if (op == MCMP) { ax = memcmp((char *)sp[2], (char *)sp[1], *sp);}
 		else if (op == MCPY) { ax = (int)memcpy((char *)sp[2], (char *)sp[1], *sp);}
+		else if (op == FREE) { free((void*)*sp);}
         else {
             printf("unknown instruction:%d\n", op);
             return -1;
@@ -1807,7 +1814,7 @@ int main(int argc, char **argv)
     old_text = text;
 
     src = "char else enum if int return sizeof struct while "
-          "open read close printf malloc memset memcmp memcpy exit void main";
+          "open read close printf malloc memset memcmp memcpy free exit void main";
 
      // add keywords to symbol table
     i = Char;

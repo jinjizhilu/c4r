@@ -8,6 +8,7 @@ struct Struct_test
 {
 	int a, b[5];
 	char c[10], *d;
+	struct Struct_test* c;
 };
 
 struct Struct_test2
