@@ -595,9 +595,17 @@ void expression(int level) {
         else if (token == '(') {
             // cast or parenthesis
             match('(');
-            if (token == Int || token == Char) {
-                tmp = (token == Char) ? CHAR : INT; // cast type
-                match(token);
+			if (token == Int || token == Char || token == Struct) {
+				tmp  = INT;
+				if (token == Char) tmp = CHAR;
+				if (token == Struct) tmp = STRUCT;
+				match(token);
+
+				if (tmp == STRUCT) {
+					id = current_id;
+					match(Id);
+				}
+
                 while (token == Mul) {
                     match(Mul);
                     tmp += PTR;
@@ -607,6 +615,7 @@ void expression(int level) {
 
                 expression(Inc); // cast has precedence as Inc(++)
 
+				last_struct = (int*)find_struct(id);
                 expr_type  = tmp;
             } else {
                 // normal parenthesis

@@ -23,24 +23,25 @@ enum {
 };
 
 struct SymbolProperty {
-	int structId;
-	int type;
-	int category;
-	int value;
-	int count;
+	int structId, type, category, value, count;
 	struct SymbolProperty *next;
 };
 
 struct Symbol {
-	int token;
-	int hash;
+	int token, hash, *funcAddr;
 	char *name;
-	int *funcAddr;
 	struct SymbolProperty *item;
 };
 
-enum {S_Id, S_Count, S_Size, S_HeadSize};
-enum {S_MemId, S_MemType, S_MemAddr, S_MemStructId, S_MemCount, S_MemSize};
+struct StructMember {
+	int id, type, addr, structId, count;
+	struct StructMember *next;
+};
+
+struct StructHeader {
+	int id, count, size;
+	struct StructMember *item;
+};
 
 // types of variable/function
 enum { CHAR, INT, STRUCT, PTR };
@@ -60,18 +61,19 @@ char *src, *old_src;  // pointer to source code string;
 int poolsize; // default size of text/data/stack
 int *pc, *bp, *sp, ax, cycle; // virtual machine registers
 
-struct Symbol symbols_new[256];	// current parsed ID
-int cid;					// symbol table
- 
-int	*current_struct, // current parsed struct
-	*structs,	 // struct table
-    line,        // line number of source code
+struct Symbol symbols_table[1000];	// current parsed ID
+int symbol_id;					// symbol table
+
+struct StructHeader structs_table[64];
+int struct_id;
+
+int	line,        // line number of source code
     token_val,   // value of current token (mainly for number)
 	pos_local;	 // position of local variables on the stack.
 
 int basetype;    // the type of a declaration, make it global for convenience
 int expr_type;   // the type of an expression
-int *last_struct;// to keep value between recursive expression processing
+int last_struct;// to keep value between recursive expression processing
 
 // function frame
 //
@@ -135,29 +137,29 @@ void next() {
             }
 
             // look for existing identifier, linear search
-			cid = 0;
-            while (symbols_new[cid].token) {
-                if (symbols_new[cid].hash == hash && !memcmp((char *)(symbols_new[cid].name), last_pos, src - last_pos)) {
+			symbol_id = 0;
+            while (symbols_table[symbol_id].token) {
+                if (symbols_table[symbol_id].hash == hash && !memcmp((char *)(symbols_table[symbol_id].name), last_pos, src - last_pos)) {
                     //found one, return
-                    token = symbols_new[cid].token;
+                    token = symbols_table[symbol_id].token;
                     return;
                 }
-				++cid;
+				++symbol_id;
 
 
-				if (cid >= 256) {
+				if (symbol_id >= 1000) {
 					printf("%d: too much symbols.\n", line);
 					exit(-1);
 				}
             }
 
             // store new ID
-            symbols_new[cid].name = last_pos;
-            symbols_new[cid].hash = hash;
-			symbols_new[cid].item = malloc(sizeof(struct SymbolProperty));
-			memset(symbols_new[cid].item, 0, sizeof(struct SymbolProperty));
+            symbols_table[symbol_id].name = last_pos;
+            symbols_table[symbol_id].hash = hash;
+			symbols_table[symbol_id].item = malloc(sizeof(struct SymbolProperty));
+			memset(symbols_table[symbol_id].item, 0, sizeof(struct SymbolProperty));
 
-            token = symbols_new[cid].token = Id;
+            token = symbols_table[symbol_id].token = Id;
             return;
         }
         else if (token >= '0' && token <= '9') {
@@ -357,33 +359,31 @@ void match(int tk) {
 }
 
 int find_struct(int id) {
-	int *struct_item = structs;
+	int struct_id = 0;
 
-	while (struct_item[S_Id] != 0) {
-		if (struct_item[S_Id] == id) {
-			return (int)struct_item;
+	while (structs_table[struct_id].id != 0) {
+		if (structs_table[struct_id].id  == id) {
+			return struct_id;
 		}
-		struct_item += S_HeadSize + struct_item[S_Count] * S_MemSize;
+		++struct_id;
 	}
-	return 0;
+	return -1;
 }
 
-int find_struct_member(int *struct_item, int id) {
-	int *struct_end = struct_item + S_HeadSize + struct_item[S_Count] * S_MemSize;
-	struct_item = struct_item + S_HeadSize;
+int find_struct_member(int struct_item, int id) {
+	struct StructMember *member;
+	member = structs_table[struct_item].item;
 
-	while (struct_item < struct_end) {
-		if (struct_item[S_MemId] == id) {
-			return (int)struct_item;
+	while (member != 0) {
+		if (member->id == id) {
+			return (int)member;
 		}
-		struct_item = struct_item + S_MemSize;
+		member = member->next;
 	}
 	return 0;
 }
 
 int get_size(int type, int data) {
-	int *addr;
-
 	if (type >= PTR) {
 		return sizeof(int);
 	}
@@ -394,8 +394,7 @@ int get_size(int type, int data) {
 		return sizeof(int);
 	}
 	else if (type == STRUCT) {
-		addr = (int*)data;
-		return addr[S_Size];
+		return structs_table[data].size;
 	}
 	return 0;
 } 
@@ -481,7 +480,8 @@ void expression(int level) {
     // 2. expr ::= unit_unary (bin_op unit_unary ...)
 
     // unit_unary()
-    int id = -1, tmp, *addr, *struct_item, *struct_tmp, op_assign, new_level;
+    int id = -1, tmp, *addr, struct_item, struct_tmp, op_assign, new_level;
+	struct StructMember *member;
 
     {
         if (!token) {
@@ -529,7 +529,7 @@ void expression(int level) {
 			match(token);
 
 			if (expr_type == STRUCT) {
-				struct_item = (int*)find_struct(cid);
+				struct_item = find_struct(symbol_id);
 				match(Id);
 			}
 
@@ -546,7 +546,7 @@ void expression(int level) {
 				*++text = get_size(expr_type, 0);
 			}
 			else {
-				*++text = get_size(expr_type, (int)struct_item);
+				*++text = get_size(expr_type, struct_item);
 			}
 
             expr_type = INT;
@@ -558,7 +558,7 @@ void expression(int level) {
             // 2. Enum variable
             // 3. global/local variable
 
-			id = cid;
+			id = symbol_id;
             match(Id);
 
             if (token == '(') {
@@ -580,14 +580,14 @@ void expression(int level) {
                 match(')');
 
                 // emit code
-                if (symbols_new[id].item->category == C_Sys) {
+                if (symbols_table[id].item->category == C_Sys) {
                     // system functions
-                    *++text = symbols_new[id].item->value;
+                    *++text = symbols_table[id].item->value;
                 }
-                else if (symbols_new[id].item->category == C_Fun) {
+                else if (symbols_table[id].item->category == C_Fun) {
                     // function call
                     *++text = CALL;
-					*++text = symbols_new[id].item->value;
+					*++text = symbols_table[id].item->value;
                 }
                 else {
                     printf("%d: bad function call\n", line);
@@ -599,50 +599,58 @@ void expression(int level) {
                     *++text = ADJ;
                     *++text = tmp;
                 }
-                expr_type = symbols_new[id].item->type;
+                expr_type = symbols_table[id].item->type;
             }
-            else if (symbols_new[id].item->category == C_Num) {
+            else if (symbols_table[id].item->category == C_Num) {
                 // enum variable
                 *++text = IMM;
-                *++text = symbols_new[id].item->value;
+                *++text = symbols_table[id].item->value;
                 expr_type = INT;
             }
             else {
                 // variable
-                if (symbols_new[id].item->category == C_Loc) {
+                if (symbols_table[id].item->category == C_Loc) {
                     *++text = LEA;
-                    *++text = index_of_bp - symbols_new[id].item->value;
+                    *++text = index_of_bp - symbols_table[id].item->value;
                 }
-                else if (symbols_new[id].item->category == C_Glo) {
+                else if (symbols_table[id].item->category == C_Glo) {
                     *++text = IMM;
-                    *++text = symbols_new[id].item->value;
+                    *++text = symbols_table[id].item->value;
                 }
                 else {
                     printf("%d: undefined variable\n", line);
                     exit(-1);
                 }
 
-				last_struct = (int*)find_struct(symbols_new[id].item->structId);
+				last_struct = find_struct(symbols_table[id].item->structId);
 
-				if (symbols_new[id].item->count == 0)
+				if (symbols_table[id].item->count == 0)
 				{
 					// emit code, default behaviour is to load the value of the
 					// address which is stored in `ax`
-					expr_type = symbols_new[id].item->type;
+					expr_type = symbols_table[id].item->type;
 					*++text = (expr_type == Char) ? LC : LI;
 				}
 				else {
 					// for array type, value is address, do not need LC/LI
-					expr_type = symbols_new[id].item->type + PTR;
+					expr_type = symbols_table[id].item->type + PTR;
 				}
             }
         }
         else if (token == '(') {
             // cast or parenthesis
             match('(');
-            if (token == Int || token == Char) {
-                tmp = (token == Char) ? CHAR : INT; // cast type
+            if (token == Int || token == Char || token == Struct) {
+				tmp  = INT;
+				if (token == Char) tmp = CHAR;
+				if (token == Struct) tmp = STRUCT;
                 match(token);
+
+				if (tmp == STRUCT) {
+					id = symbol_id;
+					match(Id);
+				}
+
                 while (token == Mul) {
                     match(Mul);
                     tmp += PTR;
@@ -652,6 +660,7 @@ void expression(int level) {
 
                 expression(Inc); // cast has precedence as Inc(++)
 
+				last_struct = find_struct(id);
                 expr_type  = tmp;
             } else {
                 // normal parenthesis
@@ -787,8 +796,8 @@ void expression(int level) {
 
                 expression(Assign);
 
-				if (assign_type_check(tmp, expr_type, (int)struct_tmp, (int)last_struct) == 0) {
-					printf("%d: unmatched type in assign\n", line);
+				if (assign_type_check(tmp, expr_type, struct_tmp, last_struct) == 0) {
+					printf("%d: unmatched type in assign, %d, %d\n", line, struct_tmp, last_struct);
 					exit(-1);
 				}
 				if (tmp == STRUCT && expr_type == STRUCT) {
@@ -796,7 +805,7 @@ void expression(int level) {
 					{
 						*text = PUSH;
 						*++text = IMM;
-						*++text = last_struct[S_Size];
+						*++text = structs_table[last_struct].size;
 						*++text = PUSH;
 						*++text = MCPY;
 					}
@@ -1099,7 +1108,7 @@ void expression(int level) {
 					// pointer, `not char *`
 					*++text = PUSH;
 					*++text = IMM;
-					*++text = get_size(expr_type, (int)last_struct);
+					*++text = get_size(expr_type, last_struct);
 					*++text = MUL;
 				}
 				else if (expr_type < CHAR) {
@@ -1117,18 +1126,18 @@ void expression(int level) {
 					*++text = LI; // this instruction will be overwritten
 				}
 
-				if (tmp != STRUCT || last_struct == 0) {
+				if (tmp != STRUCT || last_struct == -1) {
 					printf("%d: struct type expected\n", line);
 					exit(-1);
 				}
-				struct_item = (int*)last_struct;
+				struct_item = last_struct;
 				match(token);
 
-				struct_item = (int*)find_struct_member(struct_item, cid);
+				member = (struct StructMember*)find_struct_member(struct_item, symbol_id);
 				match(Id);
 
-				expr_type = struct_item[S_MemType];
-				last_struct = (int*)find_struct(struct_item[S_MemStructId]);
+				expr_type = member->type;
+				last_struct = find_struct(member->structId);
 
 				if (*text == LI) {
 					*text = PUSH;
@@ -1137,10 +1146,10 @@ void expression(int level) {
 					exit(-1);
 				}
 				*++text = IMM;
-				*++text = struct_item[S_MemAddr];
+				*++text = member->addr;
 				*++text = ADD;
 
-				if (struct_item[S_MemCount] == 0)
+				if (member->count == 0)
 				{
 					*++text = (expr_type == CHAR) ? LC : LI;
 				}
@@ -1289,10 +1298,10 @@ void enum_declaration() {
             next();
         }
 
-        symbols_new[cid].item->category = C_Num;
-        symbols_new[cid].item->type = INT;
-        symbols_new[cid].item->value = i++;
-		symbols_new[cid].item->count = 0;
+        symbols_table[symbol_id].item->category = C_Num;
+        symbols_table[symbol_id].item->type = INT;
+        symbols_table[symbol_id].item->value = i++;
+		symbols_table[symbol_id].item->count = 0;
 
         if (token == ',') {
             next();
@@ -1302,13 +1311,12 @@ void enum_declaration() {
 
 void struct_declaration(int id) {
 	// parse struct id {int a, char b, int* c, ...}
-	int *struct_head, *struct_item = 0, struct_id = 0, count = 0, type;
+	int struct_item = -1, struct_symbol_id = -1, count = 0, type;
+	struct StructMember *head = 0, *last = 0, *member = 0;
 
-	struct_head = current_struct;
-	current_struct[S_Id] = id;
-	current_struct[S_Count] = 0;
-	current_struct[S_Size] = 0;
-	current_struct = current_struct + S_HeadSize;
+	structs_table[struct_id].id = id;
+	structs_table[struct_id].count = id;
+	structs_table[struct_id].size = 0;
 
 	while (token != '}') {
 		// parse type information
@@ -1318,8 +1326,8 @@ void struct_declaration(int id) {
 		match(token);
 
 		if (basetype == STRUCT) {
-			struct_id = cid;
-			struct_item = (int*)find_struct(cid);
+			struct_symbol_id = symbol_id;
+			struct_item = find_struct(symbol_id);
 			match(Id);
 		}
 
@@ -1339,18 +1347,31 @@ void struct_declaration(int id) {
 			}
 
 			if (type % PTR == STRUCT) {
-				if (struct_item == 0 || (struct_id == id && type == STRUCT)) {
+				if (struct_item == -1 || (struct_symbol_id == id && type == STRUCT)) {
 					printf("%d: unrecognized struct type\n", line);
 					exit(-1);
 				}
 			}
 
 			// struct member declaration
-			current_struct[S_MemId] = (int)cid;
-			current_struct[S_MemType] = type;
-			current_struct[S_MemAddr] = struct_head[S_Size];
-			current_struct[S_MemCount] = 0;
-			current_struct[S_MemStructId] = (int)struct_id;
+
+			member = malloc(sizeof(struct StructMember));
+			memset(member, 0, sizeof(struct StructMember));
+
+			if (head == 0) {
+				head = member;
+			}
+
+			if (last != 0) {
+				last->next = member;
+			}
+			last = member;
+
+			member->id = symbol_id;
+			member->type = type;
+			member->addr = structs_table[struct_id].size; 
+			member->structId = struct_symbol_id;
+
 			count = 1;
 
 			match(Id);
@@ -1360,7 +1381,7 @@ void struct_declaration(int id) {
 				match(Brak);
 				if (token == Num && token_val > 0) {
 					count = token_val;
-					current_struct[S_MemCount] = token_val;
+					member->count = token_val;
 				}
 				else {
 					printf("%d: bad array declaration\n", line);
@@ -1370,9 +1391,8 @@ void struct_declaration(int id) {
 				match(']');
 			}
 
-			struct_head[S_Size] += get_size(type, (int)struct_item) * count;
-			struct_head[S_Count]++;
-			current_struct += S_MemSize;
+			structs_table[struct_id].size += get_size(type, struct_item) * count; 
+			structs_table[struct_id].count++;
 
 			if (token == ',') {
 				match(',');
@@ -1380,11 +1400,12 @@ void struct_declaration(int id) {
 		}
 		match(';');
 	}
-	
+	structs_table[struct_id].item = head;
+	++struct_id;
 }
 
 void function_parameter() {
-    int type, params = 0, *struct_item, id;
+    int type, params = 0, struct_item, id;
 
     while (token != ')') {
         // int name, ...
@@ -1394,8 +1415,8 @@ void function_parameter() {
 		match(token);
 
 		if (basetype == STRUCT) {
-			id = cid;
-			struct_item = (int*)find_struct(cid);
+			id = symbol_id;
+			struct_item = find_struct(symbol_id);
 			match(Id);
 
 			if (token != Mul) {
@@ -1416,21 +1437,21 @@ void function_parameter() {
             printf("%d: bad parameter declaration\n", line);
             exit(-1);
         }
-        if (symbols_new[cid].item->category == C_Loc) {
+        if (symbols_table[symbol_id].item->category == C_Loc) {
             printf("%d: duplicate parameter declaration\n", line);
             exit(-1);
         }
 
         // store the local variable
-		push_symbol_property(&symbols_new[cid]);
-        symbols_new[cid].item->category  = C_Loc;
-        symbols_new[cid].item->type   = type;
-        symbols_new[cid].item->value  = params++;   // index of current parameter
-		symbols_new[cid].item->count = 0;
-		symbols_new[cid].item->structId = 0;
+		push_symbol_property(&symbols_table[symbol_id]);
+        symbols_table[symbol_id].item->category  = C_Loc;
+        symbols_table[symbol_id].item->type   = type;
+        symbols_table[symbol_id].item->value  = params++;   // index of current parameter
+		symbols_table[symbol_id].item->count = 0;
+		symbols_table[symbol_id].item->structId = 0;
 
 		if (basetype == STRUCT && type >= PTR) {
-			symbols_new[cid].item->structId = (int)id;
+			symbols_table[symbol_id].item->structId = (int)id;
 		}
 
 		match(Id);
@@ -1443,23 +1464,22 @@ void function_parameter() {
 }
 
 void local_variable() {
-	int old_pos, type, id, *struct_item = 0;
+	int old_pos, type, id, struct_item = -1;
 
 	// local variable declaration, just like global ones.
 	basetype = INT;
 	if (token == Char) basetype = CHAR;
 	if (token == Struct) basetype = STRUCT;
-
 	match(token);
+
+	if (basetype == STRUCT) {
+		id = symbol_id;
+		struct_item = find_struct(symbol_id);
+		match(Id);
+	}
 
 	while (token != ';') {
 		// struct TestStruct a, ...;
-		if (basetype == STRUCT) {
-			id = cid;
-			struct_item = (int*)find_struct(cid);
-			match(Id);
-		}
-
 		type = basetype;
 		while (token == Mul) {
 			match(Mul);
@@ -1472,7 +1492,7 @@ void local_variable() {
 			exit(-1);
 		}
 
-		if (symbols_new[cid].item->category == C_Loc) {
+		if (symbols_table[symbol_id].item->category == C_Loc) {
 			// identifier exists
 			printf("%d: duplicate local declaration\n", line);
 			exit(-1);
@@ -1480,17 +1500,17 @@ void local_variable() {
 
 		old_pos = pos_local;
 		// store the local variable
-		push_symbol_property(&symbols_new[cid]);
-		symbols_new[cid].item->category  = C_Loc;
-		symbols_new[cid].item->type   = type;
-		symbols_new[cid].item->value  = ++pos_local;   // index of current parameter
-		symbols_new[cid].item->count = 0;
-		symbols_new[cid].item->structId = 0;
+		push_symbol_property(&symbols_table[symbol_id]);
+		symbols_table[symbol_id].item->category  = C_Loc;
+		symbols_table[symbol_id].item->type   = type;
+		symbols_table[symbol_id].item->value  = ++pos_local;   // index of current parameter
+		symbols_table[symbol_id].item->count = 0;
+		symbols_table[symbol_id].item->structId = 0;
 
 		if (basetype == STRUCT) {
-			symbols_new[cid].item->structId = (int)id;
-			pos_local = old_pos + align_to_int(get_size(type, (int)struct_item));
-			symbols_new[cid].item->value = pos_local;
+			symbols_table[symbol_id].item->structId = id;
+			pos_local = old_pos + align_to_int(get_size(type, struct_item));
+			symbols_table[symbol_id].item->value = pos_local;
 		}
 
 		match(Id);
@@ -1499,11 +1519,11 @@ void local_variable() {
 			// array declaration
 			match(Brak);
 			if (token == Num && token_val > 0) {
-				symbols_new[cid].item->count = token_val;
+				symbols_table[symbol_id].item->count = token_val;
 
 				// allocate memory & align to 4 byte
 				pos_local = old_pos + align_to_int(get_size(type, (int)struct_item) * (token_val));
-				symbols_new[cid].item->value = pos_local;
+				symbols_table[symbol_id].item->value = pos_local;
 			}
 			else {
 				printf("%d: bad array declaration\n", line);
@@ -1515,7 +1535,7 @@ void local_variable() {
 
 		if (token == Assign) {
 			*++text = LEA;
-			*++text = index_of_bp - symbols_new[cid].item->value;
+			*++text = index_of_bp - symbols_table[symbol_id].item->value;
 			*++text = LI; // this instruction will be overwritten
 			expr_type = type;
 
@@ -1555,7 +1575,7 @@ void function_body() {
 
 void function_declaration() {
     // type func_name (...)
-	int id = cid, *tmp;
+	int id = symbol_id, *tmp;
 
     match('(');
     function_parameter();
@@ -1566,7 +1586,7 @@ void function_declaration() {
 		*++text = JMP;
 		*++text = 0;
 		// store jmp target address
-		symbols_new[id].funcAddr = text;
+		symbols_table[id].funcAddr = text;
 		//match(';');
 	}
 	else {
@@ -1574,28 +1594,28 @@ void function_declaration() {
 		match('{');
 
 		// set jmp target address
-		if (symbols_new[id].funcAddr != 0) {
-			tmp = symbols_new[id].funcAddr;
+		if (symbols_table[id].funcAddr != 0) {
+			tmp = symbols_table[id].funcAddr;
 			*tmp = (int)(text + 1);
-			symbols_new[id].funcAddr = 0;
+			symbols_table[id].funcAddr = 0;
 		}
 
 		function_body();
 		//match('}');
 	}
 	// unwind local variable declarations for all local variables.
-	cid = 0;
-	while (symbols_new[cid].token) {
-		if (symbols_new[cid].item->category == C_Loc) {
-			pop_symbol_property(&symbols_new[cid]);
+	symbol_id = 0;
+	while (symbols_table[symbol_id].token) {
+		if (symbols_table[symbol_id].item->category == C_Loc) {
+			pop_symbol_property(&symbols_table[symbol_id]);
 		}
-		++cid;
+		++symbol_id;
 	}
 }
 
 void global_declaration() {
     // int [*]id [; | (...) {...}]
-    int type, id = 0, *struct_item = 0; // tmp, actual type for variable
+    int type, id = 0, struct_item = -1; // tmp, actual type for variable
 
     basetype = INT;
 
@@ -1621,8 +1641,8 @@ void global_declaration() {
 	if (token == Struct) {
 		match(Struct);
 		
-		id = cid;
-		struct_item = (int*)find_struct(id);
+		id = symbol_id;
+		struct_item = find_struct(id);
 		basetype = STRUCT;
 
 		match(Id);
@@ -1636,7 +1656,7 @@ void global_declaration() {
 			return;
 		}
 
-		if (struct_item == 0) {
+		if (struct_item == -1) {
 			printf("%d: undefined struct type\n", line);
 			exit(-1);
 		}
@@ -1669,34 +1689,34 @@ void global_declaration() {
             exit(-1);
         }
 		// symbols_new[cid].funcAddr != 0 means function declaration has been processed
-        if (symbols_new[cid].item->category && symbols_new[cid].funcAddr == 0) {
+        if (symbols_table[symbol_id].item->category && symbols_table[symbol_id].funcAddr == 0) {
             // identifier exists
             printf("%d: duplicate global declaration\n", line);
             exit(-1);
         }
 
-		symbols_new[cid].item->type = type;
-		symbols_new[cid].item->structId = (int)id;
-		id = cid;
+		symbols_table[symbol_id].item->type = type;
+		symbols_table[symbol_id].item->structId = (int)id;
+		id = symbol_id;
 
 		match(Id); 
 
         if (token == '(') {
-            symbols_new[id].item->category = C_Fun;
-            symbols_new[id].item->value = (int)(text + 1); // the memory address of function
-			symbols_new[id].item->count = 0;
+            symbols_table[id].item->category = C_Fun;
+            symbols_table[id].item->value = (int)(text + 1); // the memory address of function
+			symbols_table[id].item->count = 0;
             function_declaration();
         } 
 		else if (token == Brak) {
 			// array declaration
 			match(Brak);
 			if (token == Num && token_val >	0) {
-				symbols_new[id].item->category = C_Glo; // global variable
-				symbols_new[id].item->value = (int)data; // assign memory address
-				symbols_new[id].item->count = token_val;
+				symbols_table[id].item->category = C_Glo; // global variable
+				symbols_table[id].item->value = (int)data; // assign memory address
+				symbols_table[id].item->count = token_val;
 				
 				// allocate memory & align to 4 byte
-				data += get_size(type, (int)struct_item) * (token_val);
+				data += get_size(type, struct_item) * (token_val);
 				data = (char*)(align_to_int((int)data) * sizeof(int));
 			}
 			else {
@@ -1708,10 +1728,10 @@ void global_declaration() {
 		}
 		else if (token == ',' || token == ';') {
             // variable declaration
-            symbols_new[id].item->category = C_Glo; // global variable
-            symbols_new[id].item->value = (int)data; // assign memory address
-			symbols_new[id].item->count = 0;
-			data += get_size(type, (int)struct_item);
+            symbols_table[id].item->category = C_Glo; // global variable
+            symbols_table[id].item->value = (int)data; // assign memory address
+			symbols_table[id].item->count = 0;
+			data += get_size(type, struct_item);
 			data = (char*)(align_to_int((int)data) * sizeof(int));
         }
 
@@ -1851,10 +1871,6 @@ int main(int argc, char **argv)
         printf("could not malloc(%d) for stack area\n", poolsize);
         return -1;
     }
-	if (!(structs = malloc(poolsize))) {
-		printf("could not malloc(%d) for struct table\n", poolsize);
-		return -1;
-	}
 	if (!(debug_line = malloc(poolsize))) {
 		printf("could not malloc(%d) for debug line\n", poolsize);
 		return -1;
@@ -1863,13 +1879,14 @@ int main(int argc, char **argv)
     memset(text, 0, poolsize);
     memset(data, 0, poolsize);
     memset(stack, 0, poolsize);
-    memset(structs, 0, poolsize);
 	memset(debug_line, 0, poolsize);
-	memset(symbols_new, 0, sizeof(struct Symbol) * 256);
+	memset(symbols_table, 0, sizeof(struct Symbol) * 1000);
+	memset(structs_table, 0, sizeof(struct StructHeader) * 64);
+	
 	text_head = text;
 	last_text = 0;
 
-	current_struct = structs;
+	struct_id = 0;
 
     old_text = text;
 
@@ -1880,21 +1897,21 @@ int main(int argc, char **argv)
     i = Char;
     while (i <= While) {
         next();
-        symbols_new[cid].token = i++;
+        symbols_table[symbol_id].token = i++;
     }
 
     // add library to symbol table
     i = OPEN;
     while (i <= EXIT) {
         next();
-        symbols_new[cid].item->category = C_Sys;
-        symbols_new[cid].item->type = INT;
-        symbols_new[cid].item->value = i++;
-		symbols_new[cid].item->count = 0;
+        symbols_table[symbol_id].item->category = C_Sys;
+        symbols_table[symbol_id].item->type = INT;
+        symbols_table[symbol_id].item->value = i++;
+		symbols_table[symbol_id].item->count = 0;
     }
 
-    next(); symbols_new[cid].token = Char; // handle void type
-    next(); idmain = cid; // keep track of main
+    next(); symbols_table[symbol_id].token = Char; // handle void type
+    next(); idmain = symbol_id; // keep track of main
 
     if (!(src = old_src = malloc(poolsize))) {
         printf("could not malloc(%d) for source area\n", poolsize);
@@ -1910,7 +1927,7 @@ int main(int argc, char **argv)
 
     program();
 
-    if (!(pc = (int *)symbols_new[idmain].item->value)) {
+    if (!(pc = (int *)symbols_table[idmain].item->value)) {
         printf("main() not defined\n");
         return -1;
     }

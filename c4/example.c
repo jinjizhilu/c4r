@@ -48,6 +48,7 @@ int main()
 {
     int j[10];
 
+	s_a = (struct Struct_test *)0;
 	s_a = &s_a2[0];
 	s_c.a.b[0] = 234023;
 	s_a2[0].b[2] = 63242;
